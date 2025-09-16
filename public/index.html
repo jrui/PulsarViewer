@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Pulsar Payload Viewer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header>
+    <h1>Pulsar Payload Viewer</h1>
+  </header>
+  <div id="layout">
+  <section id="controls">
+    <form id="connect-form" class="panel">
+      <div class="field">
+        <label>Service URL</label>
+        <input type="text" id="serviceUrl" placeholder="pulsar://localhost:6650" required />
+      </div>
+      <div class="field">
+        <label>Topic</label>
+        <input type="text" id="topic" placeholder="persistent://public/default/my-topic" required />
+      </div>
+      <div class="field">
+        <label>Token (optional)</label>
+        <input type="password" id="token" placeholder="Paste JWT token" />
+      </div>
+      <div class="field-inline">
+        <label>Subscription</label>
+        <input type="text" id="subscription" value="viewer-sub" />
+        <label>Type</label>
+        <select id="subscriptionType">
+          <option value="Exclusive">Exclusive</option>
+          <option value="Shared">Shared</option>
+          <option value="Failover">Failover</option>
+          <option value="KeyShared">KeyShared</option>
+        </select>
+      </div>
+      <div class="actions">
+        <button type="submit" id="connectBtn">Connect</button>
+        <button type="button" id="disconnectBtn" disabled>Disconnect</button>
+        <button type="button" id="clearBtn">Clear</button>
+        <label class="checkbox"><input type="checkbox" id="autoScroll" checked /> Auto-scroll</label>
+        <label class="checkbox"><input type="checkbox" id="pause" /> Pause</label>
+      </div>
+    </form>
+  </section>
+  </div>
+  <div id="layout2">
+    <aside id="send-panel" class="panel">
+    <h2>Send Message</h2>
+    <small style="opacity:.55;display:block;margin-top:.5rem;">Uses the same Service URL / Topic / Token from the connection form on the left.</small>
+    <form id="send-form">
+      <div class="field-inline">
+        <label>Key</label>
+        <input type="text" id="sendKey" />
+      </div>
+      <div class="field">
+        <label>Properties (JSON)</label>
+        <textarea id="sendProps" rows="2" placeholder='{"foo":"bar"}'></textarea>
+      </div>
+      <div class="field">
+        <label>Payload</label>
+        <textarea id="sendPayload" rows="6" placeholder='{"example":true}' required></textarea>
+      </div>
+      <div class="actions">
+        <button type="submit" id="sendBtn">Send</button>
+      </div>
+    </form>
+  </aside>
+  </div>
+  <div id="layout3">
+    <section id="messages-section" class="panel">
+        <h2>Messages</h2>
+    <div id="messages"></div>
+    </section>
+  </div>
+  <footer>
+    <small>Apache Pulsar Viewer - lightweight inspector. Payloads attempting JSON parse; raw preserved.</small>
+  </footer>
+  <script src="app.js"></script>
+</body>
+</html>

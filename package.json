@@ -1,0 +1,34 @@
+{
+  "name": "pulsarviewer",
+  "version": "1.0.0",
+  "description": "A Typescript way to read Pulsar topics",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "nodemon --watch src --exec ts-node src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "keywords": [
+    "pulsar",
+    "viewer",
+    "typescript",
+    "apache",
+    "messaging"
+  ],
+  "author": "jrui",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/cors": "^2.8.17",
+    "@types/node": "^20.11.30",
+    "nodemon": "^3.1.10",
+    "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "pulsar-client": "^1.9.0"
+  }
+}
