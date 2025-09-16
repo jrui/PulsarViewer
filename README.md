@@ -6,6 +6,7 @@ docker build -t pulsarviewer .
 docker run -p 3000:3000 pulsarviewer
 ```
 
+
 ## Automatic GitHub Packages Deployment
 
 On every push to `main`, GitHub Actions will build and publish the Docker image to GitHub Packages:
