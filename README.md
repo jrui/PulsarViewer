@@ -7,7 +7,7 @@ A lightweight TypeScript + Express web UI to quickly inspect payloads from an Ap
 Running locally with docker:
 ```sh
 docker pull ghcr.io/jrui/pulsarviewer:latest
-docker run ghcr.io/jrui/pulsarviewer
+docker run --rm -p 3000:3000 ghcr.io/jrui/pulsarviewer
 ```
 
 

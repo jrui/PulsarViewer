@@ -96,7 +96,41 @@ app.get('/api/stream', async (req: Request, res: Response) => {
 	});
 });
 
-const port = process.env.PORT || 3000;
-app.listen(port, () => {
-	console.log(`Pulsar viewer server running on http://localhost:${port}`);
+const port = Number(process.env.PORT || 3000);
+const host = process.env.HOST || '0.0.0.0';
+
+// Start server and keep a reference so we can close it on shutdown
+const server = app.listen(port, host, () => {
+	console.log(`Pulsar viewer server running in container on http://${host}:${port}`);
+	console.log(`Map the port to your host with: docker run -p ${port}:${port} <image>`);
 });
+
+// Track open sockets so we can forcefully destroy them (SSE keeps connections open)
+const sockets = new Set<any>();
+server.on('connection', (socket) => {
+	sockets.add(socket);
+	socket.on('close', () => sockets.delete(socket));
+});
+
+const shutdown = (signal: string) => {
+	console.log(`Received ${signal}, shutting down server...`);
+	// Stop accepting new connections
+	server.close(() => {
+		console.log('HTTP server closed. Exiting.');
+		process.exit(0);
+	});
+
+	// Force-close any open sockets (SSE) so server.close callback can run
+	for (const s of sockets) {
+		try { s.destroy(); } catch { /* ignore */ }
+	}
+
+	// If still not exiting, force exit after timeout
+	setTimeout(() => {
+		console.error('Forcing shutdown after timeout.');
+		process.exit(1);
+	}, 10000).unref();
+};
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));

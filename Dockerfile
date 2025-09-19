@@ -19,6 +19,8 @@ RUN npm ci --only=production
 
 # Copy compiled output from builder stage
 COPY --from=builder /app/dist ./dist
+# Copy static public assets so the server can serve '/'
+COPY --from=builder /app/public ./public
 
 EXPOSE 3000
 CMD ["node", "dist/index.js"]
