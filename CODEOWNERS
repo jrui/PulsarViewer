@@ -1,0 +1,3 @@
+# CODEOWNERS — assign code ownership to user jrui for entire repository
+# See https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+* @jrui
