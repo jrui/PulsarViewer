@@ -21,6 +21,7 @@ interface StreamQuery {
 	subscription?: string;
 	subscriptionType?: string;
 	verbose?: string; // '1' to enable
+	filter?: string; // substring filter for messages
 }
 
 
@@ -78,7 +79,21 @@ app.get('/api/stream', async (req: Request, res: Response) => {
 		await consumer.connect();
 		send('info', { message: 'Connected. Streaming messages.' });
 		(async () => {
+			const f = q.filter;
 			for await (const m of consumer.messageStream()) {
+				try {
+					// If a filter is provided, only send messages that include the substring.
+					if (f && f.length > 0) {
+						const s = typeof m === 'string' ? m : JSON.stringify(m);
+						if (!s.includes(f)) continue;
+					}
+				} catch (err) {
+					// If stringification fails, and verbose, send error info and skip
+					if (q.verbose === '1') {
+						send('error', { error: 'Failed to apply filter to message', detail: String(err) });
+					}
+					continue;
+				}
 				send('message', m);
 			}
 		})();

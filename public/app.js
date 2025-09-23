@@ -60,9 +60,12 @@
     });
     const token = tokenEl.value.trim();
     if (token) params.append('token', token);
+    // Append filter if present in the UI
+    const filterEl = document.getElementById('filter');
+    if (filterEl && filterEl.value.trim()) params.append('filter', filterEl.value.trim());
 
     addMessage('info', 'Opening stream...');
-    evtSource = new EventSource(`/api/stream?${params.toString()}`);
+  evtSource = new EventSource(`/api/stream?${params.toString()}`);
 
     evtSource.addEventListener('info', e => {
       addMessage('info', JSON.parse(e.data));
