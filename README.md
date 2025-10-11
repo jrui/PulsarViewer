@@ -91,6 +91,8 @@ Query params (optional):
 - `initialPosition` earliest|latest (default latest)
 - `verbose=1` includes stack traces / extra diagnostics
 
+- `filter` a substring used to filter incoming messages. When provided, only messages whose stringified payload contains this substring will be sent over the SSE stream. This can also be set from the UI using the new "Filter" field in the connection form.
+
 
 
 ---
