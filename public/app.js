@@ -16,7 +16,7 @@
 
   const counterEl = document.createElement('div');
   counterEl.id = 'counter';
-  counterEl.style.cssText = 'position:sticky;top:0;right:0;margin-left:auto;font-size:.65rem;opacity:.6;';
+  counterEl.textContent = '0 messages';
   document.getElementById('messages').before(counterEl);
   let count = 0;
 
@@ -32,7 +32,8 @@
 
     const meta = document.createElement('div');
     meta.className = 'meta';
-    meta.textContent = `[${new Date().toLocaleTimeString()}] ${kind.toUpperCase()}`;
+    const icons = { info: '💡', error: '❌', message: '✅' };
+    meta.innerHTML = `<span>${icons[kind] || '📋'}</span><span>[${new Date().toLocaleTimeString()}] ${kind.toUpperCase()}</span>`;
 
     const pre = document.createElement('pre');
     pre.className = 'payload';
@@ -43,7 +44,7 @@
     messagesEl.appendChild(container);
 
     count++;
-    counterEl.textContent = `${count} messages`;
+    counterEl.textContent = `${count} message${count !== 1 ? 's' : ''}`;
 
     if (autoScrollEl.checked) {
       container.scrollIntoView({ behavior: 'smooth', block: 'end' });

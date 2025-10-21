@@ -4,11 +4,14 @@
   <meta charset="UTF-8" />
   <title>Pulsar Payload Viewer</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <header>
-    <h1>Pulsar Payload Viewer</h1>
+    <h1>⚡ Pulsar Payload Viewer</h1>
   </header>
   <div id="layout">
   <section id="controls">
@@ -52,8 +55,8 @@
   </div>
   <div id="layout2">
     <aside id="send-panel" class="panel">
-    <h2>Send Message</h2>
-    <small style="opacity:.55;display:block;margin-top:.5rem;">Uses the same Service URL / Topic / Token from the connection form on the left.</small>
+    <h2>📤 Send Message</h2>
+    <small class="text-muted" style="display:block;margin-bottom:1rem;">Uses the same Service URL / Topic / Token from the connection form above.</small>
     <form id="send-form">
       <div class="field-inline">
         <label>Key</label>
@@ -75,12 +78,12 @@
   </div>
   <div id="layout3">
     <section id="messages-section" class="panel">
-        <h2>Messages</h2>
+        <h2>📨 Messages</h2>
     <div id="messages"></div>
     </section>
   </div>
   <footer>
-    <small>Apache Pulsar Viewer - lightweight inspector. Payloads attempting JSON parse; raw preserved.</small>
+    <small>Made with ❤️ for Apache Pulsar • Lightweight message inspector with live streaming</small>
   </footer>
   <script src="app.js"></script>
 </body>
