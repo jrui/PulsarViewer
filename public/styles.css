@@ -43,7 +43,7 @@ body {
 /* Header */
 header {
   background: linear-gradient(135deg, #1a1f28 0%, #12161d 100%);
-  padding: 1.5rem 2rem;
+  padding: 1rem;
   box-shadow: var(--shadow-lg);
   border-bottom: 1px solid var(--color-border-primary);
   backdrop-filter: blur(10px);
@@ -61,13 +61,27 @@ h1 {
 }
 
 /* Layout */
-#layout, #layout2, #layout3 {
+#layout {
   display: flex;
   gap: 1.5rem;
   padding: 1.5rem 2rem;
   align-items: flex-start;
-  max-width: 1800px;
-  margin: 0 auto;
+}
+
+#layout2, #layout3 {
+  display: inline-block;
+  vertical-align: top;
+  padding: 1.5rem 1rem;
+}
+
+#layout2 {
+  width: 400px;
+  padding-left: 2rem;
+}
+
+#layout3 {
+  width: calc(100% - 400px - 1rem);
+  padding-right: 1.5rem;
 }
 
 #controls {
@@ -77,7 +91,6 @@ h1 {
 }
 
 #send-panel {
-  flex: 0 0 400px;
   position: sticky;
   top: 1.5rem;
   align-self: flex-start;
@@ -88,13 +101,19 @@ h1 {
 }
 
 @media (max-width: 1100px) {
-  #layout, #layout2 {
+  #layout {
     flex-direction: column;
   }
+  
+  #layout2, #layout3 {
+    display: block;
+    width: 100%;
+    padding: 1.5rem 2rem;
+  }
+  
   #send-panel {
     position: static;
     width: 100%;
-    flex: 1;
   }
 }
 
@@ -293,7 +312,18 @@ button[disabled] {
 }
 
 #messages-section h2 {
-  padding: 0 0.5rem;
+  padding: 0.5rem;
+}
+
+#messages-section .filter-container {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0.5rem 1rem 0.5rem;
+}
+
+input#filter {
+  flex: 1;
 }
 
 #messages {
