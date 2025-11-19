@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Pulsar Payload Viewer</title>
+  <title>Pulsar Viewer</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -11,7 +11,7 @@
 </head>
 <body>
   <header>
-    <h1>⚡ Pulsar Payload Viewer</h1>
+    <h1 style="text-align: center;">⚡ Pulsar Viewer ⚡</h1>
   </header>
   <div id="layout">
   <section id="controls">
@@ -28,20 +28,18 @@
         <label>Token (optional)</label>
         <input type="password" id="token" placeholder="Paste JWT token" />
         </div>
-        <div class="field">
-          <label>Filter</label>
-          <input id="filter" placeholder="filter (show only messages containing this)" />
-      </div>
-      <div class="field-inline">
-        <label>Subscription</label>
-        <input type="text" id="subscription" value="viewer-sub" />
-        <label>Type</label>
+      <div class="field">
+        <label>Subscription Type</label>
         <select id="subscriptionType">
           <option value="Exclusive">Exclusive</option>
           <option value="Shared">Shared</option>
           <option value="Failover">Failover</option>
           <option value="KeyShared">KeyShared</option>
         </select>
+      </div>
+      <div class="field">
+        <label>Subscription Name</label>
+        <input type="text" id="subscription" value="viewer-sub" />
       </div>
       <div class="actions">
         <button type="submit" id="connectBtn">Connect</button>
@@ -79,11 +77,15 @@
   <div id="layout3">
     <section id="messages-section" class="panel">
         <h2>📨 Messages</h2>
+        <div class="filter-container">
+          <label>Filter</label>
+          <input id="filter" placeholder="filter (show only messages containing this)" />
+      </div>
     <div id="messages"></div>
     </section>
   </div>
   <footer>
-    <small>Made with ❤️ for Apache Pulsar • Lightweight message inspector with live streaming</small>
+    <small>Made with ❤️ by <a href="https://www.linkedin.com/in/jrui/" target="_blank" style="color: white;">jrui</a> • Lightweight message inspector with live streaming</small>
   </footer>
   <script src="app.js"></script>
 </body>

@@ -1,4 +1,4 @@
-# Pulsar Payload Viewer
+# Pulsar Viewer
 A lightweight TypeScript + Express web UI to quickly inspect payloads from an Apache Pulsar topic (read-only consumer). Connect using a service URL (broker or proxy), optional token authentication, and stream messages live via Server-Sent Events.
 
 
