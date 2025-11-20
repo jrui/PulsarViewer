@@ -68,6 +68,7 @@ export interface ConsumerConfig {
   topic: string; // topic full name
   subscription: string; // subscription name
   subscriptionType?: 'Exclusive' | 'Shared' | 'Failover' | 'KeyShared';
+  subscriptionMode?: 'Durable' | 'NonDurable';
   initialPosition?: 'earliest' | 'latest';
   verbose?: boolean;
 }
@@ -88,11 +89,13 @@ export class PulsarConsumerWrapper {
       });
 
       const subType = this.mapSubscriptionType(this.cfg.subscriptionType);
+      const subMode = this.mapSubscriptionMode(this.cfg.subscriptionMode);
       const initialPos = this.mapInitialPosition(this.cfg.initialPosition);
       const subscribeOpts: any = {
         topic: this.cfg.topic,
         subscription: this.cfg.subscription,
         subscriptionType: subType,
+        subscriptionMode: subMode,
         ackTimeoutMs: 30000,
       };
       if (initialPos !== undefined) subscribeOpts.subscriptionInitialPosition = initialPos;
@@ -130,6 +133,22 @@ export class PulsarConsumerWrapper {
     if (v === undefined) {
       console.warn(`Unknown subscriptionType '${t}', defaulting to Exclusive`);
       return 0;
+    }
+    return v;
+  }
+
+  private mapSubscriptionMode(m?: ConsumerConfig['subscriptionMode']) {
+    // pulsar-client subscription mode: 0 Durable, 1 NonDurable
+    const map: Record<string, number> = {
+      durable: 0,
+      nondurable: 1,
+      'non-durable': 1,
+    };
+    if (!m) return 1; // default to NonDurable
+    const v = map[m.toLowerCase()];
+    if (v === undefined) {
+      console.warn(`Unknown subscriptionMode '${m}', defaulting to NonDurable`);
+      return 1;
     }
     return v;
   }
