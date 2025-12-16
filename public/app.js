@@ -11,8 +11,13 @@
   const clearBtn = document.getElementById('clearBtn');
   const autoScrollEl = document.getElementById('autoScroll');
   const pauseEl = document.getElementById('pause');
+  const filterEl = document.getElementById('filter');
+  const useRegexEl = document.getElementById('useRegex');
 
   let evtSource = null;
+  let allMessages = []; // Store all messages received from backend
+  let currentFilterValue = '';
+  let currentUseRegex = false;
 
   const counterEl = document.createElement('div');
   counterEl.id = 'counter';
@@ -25,8 +30,34 @@
       .replace(/:\s*\"(\\u[a-fA-F0-9]{4}|\\[^u]|[^\\"])*\"/g, m => m.replace(/\"([^\"]*)\"$/, v => v.replace(/\"/g, '"'))) // keep values
   }
 
-  function addMessage(kind, payload) {
+  // Check if a message matches the current filter
+  function matchesFilter(payload) {
+    const filterValue = currentFilterValue.trim();
+    if (!filterValue) return true; // No filter, show all
+
+    const payloadStr = typeof payload === 'string' ? payload : JSON.stringify(payload);
+    
+    if (currentUseRegex) {
+      try {
+        const regex = new RegExp(filterValue);
+        return regex.test(payloadStr);
+      } catch (e) {
+        // Invalid regex, fallback to substring match
+        return payloadStr.includes(filterValue);
+      }
+    } else {
+      return payloadStr.includes(filterValue);
+    }
+  }
+
+  function addMessage(kind, payload, skipFilter = false) {
     if (pauseEl.checked) return;
+    
+    // Apply filter only to 'message' kind, not to info/error messages
+    if (kind === 'message' && !skipFilter && !matchesFilter(payload)) {
+      return; // Don't display message if it doesn't match filter
+    }
+
     const container = document.createElement('div');
     container.className = 'msg ' + kind;
 
@@ -61,24 +92,29 @@
     });
     const token = tokenEl.value.trim();
     if (token) params.append('token', token);
-    // Append filter if present in the UI
-    const filterEl = document.getElementById('filter');
-    if (filterEl && filterEl.value.trim()) params.append('filter', filterEl.value.trim());
+    // Note: No longer sending filter to backend - filtering happens on frontend
 
-    addMessage('info', 'Opening stream...');
-  evtSource = new EventSource(`/api/stream?${params.toString()}`);
+    addMessage('info', 'Opening stream...', true);
+    evtSource = new EventSource(`/api/stream?${params.toString()}`);
 
     evtSource.addEventListener('info', e => {
-      addMessage('info', JSON.parse(e.data));
+      addMessage('info', JSON.parse(e.data), true);
     });
     evtSource.addEventListener('error', e => {
-      try { addMessage('error', JSON.parse(e.data)); } catch { addMessage('error', 'Stream error'); }
+      try { addMessage('error', JSON.parse(e.data), true); } catch { addMessage('error', 'Stream error', true); }
     });
     evtSource.addEventListener('message', e => {
-      try { addMessage('message', JSON.parse(e.data)); } catch { addMessage('message', e.data); }
+      try { 
+        const msgData = JSON.parse(e.data);
+        allMessages.push(msgData); // Store all messages
+        addMessage('message', msgData); // Display with filtering
+      } catch { 
+        allMessages.push(e.data);
+        addMessage('message', e.data); 
+      }
     });
     evtSource.onerror = () => {
-      addMessage('error', 'Connection lost');
+      addMessage('error', 'Connection lost', true);
       disconnect();
     };
 
@@ -90,7 +126,8 @@
     if (evtSource) {
       evtSource.close();
       evtSource = null;
-      addMessage('info', 'Disconnected');
+      addMessage('info', 'Disconnected', true);
+      allMessages = []; // Clear stored messages on disconnect
     }
     connectBtn.disabled = false;
     disconnectBtn.disabled = true;
@@ -98,8 +135,45 @@
 
   function clearMessages() {
     messagesEl.innerHTML = '';
+    allMessages = []; // Clear stored messages
     count = 0;
     counterEl.textContent = '';
+  }
+
+  // Refresh the message view with current filter
+  function refreshMessageView() {
+    // Save scroll position
+    const scrollTop = messagesEl.parentElement ? messagesEl.parentElement.scrollTop : 0;
+    
+    // Clear displayed messages
+    messagesEl.innerHTML = '';
+    count = 0;
+    
+    // Re-display all messages with current filter
+    allMessages.forEach(msg => {
+      addMessage('message', msg);
+    });
+    
+    // Restore scroll position if not auto-scrolling
+    if (!autoScrollEl.checked && messagesEl.parentElement) {
+      messagesEl.parentElement.scrollTop = scrollTop;
+    }
+  }
+
+  // Watch for filter changes
+  if (filterEl) {
+    filterEl.addEventListener('input', () => {
+      currentFilterValue = filterEl.value;
+      refreshMessageView();
+    });
+  }
+
+  // Watch for regex toggle changes
+  if (useRegexEl) {
+    useRegexEl.addEventListener('change', () => {
+      currentUseRegex = useRegexEl.checked;
+      refreshMessageView();
+    });
   }
 
   form.addEventListener('submit', e => {

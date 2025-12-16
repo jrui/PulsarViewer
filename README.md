@@ -20,6 +20,8 @@ docker run --rm -p 3000:3000 ghcr.io/jrui/pulsarviewer
 - Auto-scroll toggle & pause
 - Clear messages & running counter
 - Supports Exclusive/Shared/Failover/KeyShared subscription types
+- Client-side message filtering with substring or regex matching
+- Dynamic filter updates without reconnection
 
 
 
@@ -47,6 +49,7 @@ npm run dev
 5. Click Connect – messages appear live
 6. Use Pause to temporarily stop rendering (messages still consumed)
 7. Use Clear to wipe current display
+8. Use Filter to show only messages containing specific text (supports regex with toggle)
 
 
 ### Sending messages
@@ -90,8 +93,6 @@ Query params (optional):
 - `subscriptionType` one of Exclusive|Shared|Failover|KeyShared
 - `initialPosition` earliest|latest (default latest)
 - `verbose=1` includes stack traces / extra diagnostics
-
-- `filter` a substring used to filter incoming messages. When provided, only messages whose stringified payload contains this substring will be sent over the SSE stream. This can also be set from the UI using the new "Filter" field in the connection form.
 
 
 
