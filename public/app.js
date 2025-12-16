@@ -104,14 +104,14 @@
       try { addMessage('error', JSON.parse(e.data), true); } catch { addMessage('error', 'Stream error', true); }
     });
     evtSource.addEventListener('message', e => {
+      let msgData;
       try { 
-        const msgData = JSON.parse(e.data);
-        allMessages.push(msgData); // Store all messages
-        addMessage('message', msgData); // Display with filtering
+        msgData = JSON.parse(e.data);
       } catch { 
-        allMessages.push(e.data);
-        addMessage('message', e.data); 
+        msgData = e.data;
       }
+      allMessages.push(msgData); // Store all messages
+      addMessage('message', msgData); // Display with filtering
     });
     evtSource.onerror = () => {
       addMessage('error', 'Connection lost', true);
@@ -141,6 +141,8 @@
   }
 
   // Refresh the message view with current filter
+  // Note: For large message volumes, this could be optimized by showing/hiding
+  // existing DOM elements instead of recreating them
   function refreshMessageView() {
     // Save scroll position
     const scrollTop = messagesEl.parentElement ? messagesEl.parentElement.scrollTop : 0;
@@ -148,11 +150,15 @@
     // Clear displayed messages
     messagesEl.innerHTML = '';
     count = 0;
+    counterEl.textContent = '';
     
     // Re-display all messages with current filter
     allMessages.forEach(msg => {
       addMessage('message', msg);
     });
+    
+    // Update counter after all messages are processed
+    counterEl.textContent = `${count} message${count !== 1 ? 's' : ''}`;
     
     // Restore scroll position if not auto-scrolling
     if (!autoScrollEl.checked && messagesEl.parentElement) {
