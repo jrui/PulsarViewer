@@ -1,5 +1,11 @@
 import Pulsar from 'pulsar-client';
 
+// Create a simple logger that will work in both Node and Electron contexts
+const logger = {
+  info: (...args: any[]) => console.log('[PulsarService]', ...args),
+  error: (...args: any[]) => console.error('[PulsarService]', ...args),
+};
+
 export interface ProducerConfig {
   serviceUrl: string;
   token?: string;
@@ -93,11 +99,14 @@ export class PulsarConsumerWrapper {
     try {
       const clientConfig: any = { serviceUrl };
       if (token) {
+        console.log('[PulsarConsumerWrapper] Token received, length:', token.length);
+        console.log('[PulsarConsumerWrapper] Token preview:', token.slice(0, 30) + '...' + token.slice(-30));
         clientConfig.authentication = new Pulsar.AuthenticationToken({ token });
-        console.log('[PulsarConsumerWrapper] Using authentication with token:', token.slice(0, 8) + '...');
       } else {
         console.log('[PulsarConsumerWrapper] No token provided, connecting without authentication');
       }
+      clientConfig.tlsAllowInsecureConnection = true;
+      clientConfig.tlsValidateHostname = false;
       console.log('[PulsarConsumerWrapper] Connecting to:', serviceUrl);
       console.log('[PulsarConsumerWrapper] Topic:', this.cfg.topic);
       console.log('[PulsarConsumerWrapper] Subscription:', this.cfg.subscription);
@@ -127,6 +136,16 @@ export class PulsarConsumerWrapper {
       }
       this.consumer = await this.client.subscribe(subscribeOpts);
     } catch (e: any) {
+      logger.error('=== PULSAR CLIENT ERROR DETAILS ===');
+      logger.error('Error message:', e?.message);
+      logger.error('Error name:', e?.name);
+      logger.error('Error code:', e?.code);
+      logger.error('Error stack:', e?.stack);
+      if (e?.cause) {
+        logger.error('Error cause:', e.cause);
+      }
+      logger.error('Full error object:', JSON.stringify(e, Object.getOwnPropertyNames(e), 2));
+      logger.error('=== END ERROR DETAILS ===');
       const enriched = new Error(`Failed to create consumer: ${e?.message || e}`);
       (enriched as any).cause = e;
       throw enriched;

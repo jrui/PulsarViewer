@@ -169,39 +169,79 @@
   function connect() {
     if (evtSource) return;
     
-    const params = new URLSearchParams({
+    const payload = {
       serviceUrl: serviceUrlEl.value.trim(),
       topic: topicEl.value.trim(),
       subscription: subscriptionEl.value.trim(),
       subscriptionType: subscriptionTypeEl.value,
-    });
-    const token = tokenEl.value.trim();
-    if (token) params.append('token', token);
-    // Note: No longer sending filter to backend - filtering happens on frontend
+      token: tokenEl.value.trim() || undefined,
+    };
 
     addMessage('info', 'Opening stream...', true);
-    evtSource = new EventSource(`/api/stream?${params.toString()}`);
-
-    evtSource.addEventListener('info', e => {
-      addMessage('info', JSON.parse(e.data), true);
-    });
-    evtSource.addEventListener('error', e => {
-      try { addMessage('error', JSON.parse(e.data), true); } catch { addMessage('error', 'Stream error', true); }
-    });
-    evtSource.addEventListener('message', e => {
-      let msgData;
-      try { 
-        msgData = JSON.parse(e.data);
-      } catch { 
-        msgData = e.data;
+    
+    // Use fetch to POST the connection request
+    fetch('/api/stream', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    }).then(response => {
+      if (!response.ok) {
+        throw new Error('Failed to establish stream');
       }
-      allMessages.push(msgData); // Store all messages
-      addMessage('message', msgData); // Display with filtering
-    });
-    evtSource.onerror = () => {
-      addMessage('error', 'Connection lost', true);
+      
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      
+      function processStream() {
+        reader.read().then(({ done, value }) => {
+          if (done) {
+            disconnect();
+            return;
+          }
+          
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n\n');
+          
+          lines.forEach(line => {
+            if (line.startsWith('data: ')) {
+              try {
+                const msgData = JSON.parse(line.substring(6));
+                if (msgData.error) {
+                  addMessage('error', msgData.error, true);
+                } else {
+                  allMessages.push(msgData);
+                  addMessage('message', msgData);
+                }
+              } catch (err) {
+                console.error('Failed to parse SSE data:', err);
+              }
+            }
+          });
+          
+          processStream();
+        }).catch(error => {
+          console.error('Stream reading error:', error);
+          addMessage('error', 'Stream connection lost', true);
+          disconnect();
+        });
+      }
+      
+      processStream();
+      
+      // Create a pseudo EventSource object for compatibility
+      evtSource = {
+        close: () => {
+          reader.cancel();
+          evtSource = null;
+        }
+      };
+      
+    }).catch(error => {
+      addMessage('error', error.message, true);
       disconnect();
-    };
+    });
 
     connectBtn.disabled = true;
     disconnectBtn.disabled = false;

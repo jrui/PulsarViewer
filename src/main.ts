@@ -140,14 +140,21 @@ expressApp.post('/api/send', async (req: Request, res: Response) => {
 });
 
 // Stream messages endpoint
-expressApp.get('/api/stream', async (req: Request, res: Response) => {
+expressApp.post('/api/stream', async (req: Request, res: Response) => {
 	const { serviceUrl, token, topic, subscription, subscriptionType, verbose, filter } =
-		(req.query as unknown as StreamQuery) || {};
+		req.body || {};
+
+	log.info('[/api/stream] Request received');
+	log.info('[/api/stream] serviceUrl:', serviceUrl);
+	log.info('[/api/stream] topic:', topic);
+	log.info('[/api/stream] subscription:', subscription);
+	log.info('[/api/stream] token length:', token?.length || 0);
+	log.info('[/api/stream] token preview:', token ? token.slice(0, 30) + '...' + token.slice(-30) : 'none');
 
 	if (!serviceUrl || !topic || !subscription) {
 		return res.status(400).json({
 			success: false,
-			error: 'Missing required query params: serviceUrl, topic, subscription',
+			error: 'Missing required fields: serviceUrl, topic, subscription',
 		});
 	}
 
@@ -208,6 +215,22 @@ expressApp.get('/api/stream', async (req: Request, res: Response) => {
 		});
 	} catch (error: any) {
 		log.error('Error in stream endpoint:', error);
+		log.error('Error details - message:', error?.message);
+		log.error('Error details - name:', error?.name);
+		log.error('Error details - stack:', error?.stack);
+		
+		// Recursively log all nested causes
+		let currentError = error;
+		let level = 0;
+		while (currentError?.cause && level < 10) {
+			level++;
+			currentError = currentError.cause;
+			log.error(`Cause level ${level} - message:`, currentError?.message);
+			log.error(`Cause level ${level} - name:`, currentError?.name);
+			log.error(`Cause level ${level} - stack:`, currentError?.stack);
+			log.error(`Cause level ${level} - full error:`, JSON.stringify(currentError, Object.getOwnPropertyNames(currentError)));
+		}
+		
 		res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
 		res.end();
 		consumer.close().catch((error: any) => log.error('Error closing consumer:', error));
