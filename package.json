@@ -1,12 +1,17 @@
 {
   "name": "pulsarviewer",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "A Typescript way to read Pulsar topics",
-  "main": "dist/index.js",
+  "main": "dist/main.js",
+  "homepage": "https://github.com/jrui/PulsarViewer",
   "scripts": {
     "build": "tsc",
     "dev": "nodemon --watch src --exec ts-node src/index.ts",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "dev:electron": "concurrently \"tsc --watch\" \"wait-on dist/main.js && electron dist/main.js\"",
+    "start:electron": "electron dist/main.js",
+    "build:electron": "npm run build && electron-builder --publish never",
+    "build:electron:publish": "npm run build && electron-builder --publish always"
   },
   "keywords": [
     "pulsar",
@@ -17,17 +22,49 @@
   ],
   "author": "jrui",
   "license": "ISC",
+  "build": {
+    "appId": "com.pulsarviewer.app",
+    "productName": "PulsarViewer",
+    "directories": {
+      "buildResources": "public"
+    },
+    "files": [
+      "dist/**/*",
+      "public/**/*"
+    ],
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "public/pulsar_viewer_logo.png",
+      "category": "public.app-category.utilities"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "public/pulsar_viewer_logo.png"
+    }
+  },
   "devDependencies": {
-    "@types/express": "^4.17.21",
     "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
     "@types/node": "^20.11.30",
+    "concurrently": "^8.2.2",
+    "electron": "^27.0.0",
+    "electron-builder": "^24.6.4",
+    "esbuild": "^0.27.2",
     "nodemon": "^3.1.10",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "wait-on": "^7.0.1"
   },
   "dependencies": {
     "cors": "^2.8.5",
+    "electron-store": "^8.1.0",
     "express": "^4.19.2",
     "pulsar-client": "^1.9.0"
   }

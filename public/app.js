@@ -1,4 +1,78 @@
 (() => {
+  // Storage utilities - use Electron if available, otherwise localStorage
+  const storage = {
+    isElectron: window.electron && window.electron.saveConnection,
+    
+    async saveConnection(label, credentials) {
+      if (this.isElectron) {
+        return window.electron.saveConnection(label, credentials);
+      } else {
+        const connections = JSON.parse(localStorage.getItem('pulsarConnections') || '{}');
+        connections[label] = credentials;
+        localStorage.setItem('pulsarConnections', JSON.stringify(connections));
+        return { success: true };
+      }
+    },
+    
+    async loadConnections() {
+      if (this.isElectron) {
+        return window.electron.loadConnections();
+      } else {
+        const connections = JSON.parse(localStorage.getItem('pulsarConnections') || '{}');
+        return Object.keys(connections);
+      }
+    },
+    
+    async loadConnection(label) {
+      if (this.isElectron) {
+        return window.electron.loadConnection(label);
+      } else {
+        const connections = JSON.parse(localStorage.getItem('pulsarConnections') || '{}');
+        return connections[label] || null;
+      }
+    },
+    
+    async deleteConnection(label) {
+      if (this.isElectron) {
+        return window.electron.deleteConnection(label);
+      } else {
+        const connections = JSON.parse(localStorage.getItem('pulsarConnections') || '{}');
+        delete connections[label];
+        localStorage.setItem('pulsarConnections', JSON.stringify(connections));
+        return { success: true };
+      }
+    },
+  };
+
+  // Handle splash screen animation completion
+  document.addEventListener('DOMContentLoaded', async () => {
+    // Wait for animation to complete (3.5s total: 3s animation + 1.5s delay for fade)
+    setTimeout(() => {
+      document.body.style.overflow = 'auto';
+    }, 4500);
+    
+    // Load saved connections
+    try {
+      const connectionLabels = await storage.loadConnections();
+      const savedConnectionsEl = document.getElementById('savedConnections');
+      
+      if (savedConnectionsEl && connectionLabels.length > 0) {
+        // Clear existing options except the first one
+        savedConnectionsEl.innerHTML = '<option value="">-- Select a saved connection --</option>';
+        
+        // Add saved connections to dropdown
+        connectionLabels.forEach(label => {
+          const option = document.createElement('option');
+          option.value = label;
+          option.textContent = label;
+          savedConnectionsEl.appendChild(option);
+        });
+      }
+    } catch (error) {
+      console.error('Failed to load saved connections:', error);
+    }
+  });
+
   const form = document.getElementById('connect-form');
   const serviceUrlEl = document.getElementById('serviceUrl');
   const topicEl = document.getElementById('topic');
@@ -10,11 +84,21 @@
   const disconnectBtn = document.getElementById('disconnectBtn');
   const clearBtn = document.getElementById('clearBtn');
   const autoScrollEl = document.getElementById('autoScroll');
-  const pauseEl = document.getElementById('pause');
+  const pauseBtn = document.getElementById('pauseBtn');
   const filterEl = document.getElementById('filter');
   const useRegexEl = document.getElementById('useRegex');
+  const savedConnectionsEl = document.getElementById('savedConnections');
+  const loadConnectionBtn = document.getElementById('loadConnectionBtn');
+  const deleteConnectionBtn = document.getElementById('deleteConnectionBtn');
+  const saveConnectionBtn = document.getElementById('saveConnectionBtn');
+  const connectionLabelEl = document.getElementById('connectionLabel');
+  const labelModal = document.getElementById('labelModal');
+  const labelModalInput = document.getElementById('labelModalInput');
+  const labelModalSave = document.getElementById('labelModalSave');
+  const labelModalCancel = document.getElementById('labelModalCancel');
 
   let evtSource = null;
+  let isPaused = false;
   let allMessages = []; // Store all messages received from backend
   let currentFilterValue = '';
   let currentUseRegex = false;
@@ -51,7 +135,7 @@
   }
 
   function addMessage(kind, payload, skipFilter = false) {
-    if (pauseEl.checked) return;
+    if (isPaused) return;
     
     // Apply filter only to 'message' kind, not to info/error messages
     if (kind === 'message' && !skipFilter && !matchesFilter(payload)) {
@@ -84,6 +168,7 @@
 
   function connect() {
     if (evtSource) return;
+    
     const params = new URLSearchParams({
       serviceUrl: serviceUrlEl.value.trim(),
       topic: topicEl.value.trim(),
@@ -188,6 +273,133 @@
   });
   disconnectBtn.addEventListener('click', disconnect);
   clearBtn.addEventListener('click', clearMessages);
+
+  // Pause/Unpause button
+  if (pauseBtn) {
+    pauseBtn.addEventListener('click', () => {
+      isPaused = !isPaused;
+      pauseBtn.textContent = isPaused ? 'Resume' : 'Pause';
+      pauseBtn.style.backgroundColor = isPaused ? 'var(--color-warning)' : '';
+    });
+  }
+
+  // Auto-load connection when selected from dropdown
+  if (savedConnectionsEl) {
+    savedConnectionsEl.addEventListener('change', async () => {
+      const selectedLabel = savedConnectionsEl.value;
+      if (!selectedLabel) {
+        return;
+      }
+      
+      try {
+        const connection = await storage.loadConnection(selectedLabel);
+        if (connection) {
+          serviceUrlEl.value = connection.serviceUrl || '';
+          topicEl.value = connection.topic || '';
+          subscriptionEl.value = connection.subscription || 'viewer-sub';
+          subscriptionTypeEl.value = connection.subscriptionType || 'Exclusive';
+          tokenEl.value = connection.token || '';
+        }
+      } catch (err) {
+        console.error('Failed to load connection:', err);
+        alert('Failed to load connection');
+      }
+    });
+  }
+
+  // Connection management
+  if (saveConnectionBtn) {
+    saveConnectionBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      labelModal.style.display = 'flex';
+      labelModalInput.value = '';
+      labelModalInput.focus();
+    });
+  }
+
+  if (labelModalCancel) {
+    labelModalCancel.addEventListener('click', () => {
+      labelModal.style.display = 'none';
+    });
+  }
+
+  if (labelModalSave) {
+    labelModalSave.addEventListener('click', async () => {
+      const label = labelModalInput.value.trim();
+      if (!label) {
+        alert('Please enter a name for this connection');
+        return;
+      }
+      
+      try {
+        await storage.saveConnection(label, {
+          serviceUrl: serviceUrlEl.value.trim(),
+          topic: topicEl.value.trim(),
+          subscription: subscriptionEl.value.trim(),
+          subscriptionType: subscriptionTypeEl.value,
+          token: tokenEl.value.trim(),
+        });
+        
+        // Refresh the connections dropdown
+        const connectionLabels = await storage.loadConnections();
+        savedConnectionsEl.innerHTML = '<option value="">-- Select a saved connection --</option>';
+        connectionLabels.forEach(l => {
+          const option = document.createElement('option');
+          option.value = l;
+          option.textContent = l;
+          savedConnectionsEl.appendChild(option);
+        });
+        
+        // Select the newly saved connection
+        savedConnectionsEl.value = label;
+        labelModal.style.display = 'none';
+      } catch (err) {
+        console.error('Failed to save connection:', err);
+        alert('Failed to save connection');
+      }
+    });
+  }
+
+  // Allow Enter key to save in modal
+  if (labelModalInput) {
+    labelModalInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        labelModalSave.click();
+      }
+    });
+  }
+
+  if (deleteConnectionBtn) {
+    deleteConnectionBtn.addEventListener('click', async () => {
+      const selectedLabel = savedConnectionsEl.value;
+      if (!selectedLabel) {
+        alert('Please select a connection to delete');
+        return;
+      }
+      
+      if (!confirm(`Are you sure you want to delete the connection "${selectedLabel}"?`)) {
+        return;
+      }
+      
+      try {
+        await storage.deleteConnection(selectedLabel);
+        
+        // Refresh the connections dropdown
+        const connectionLabels = await storage.loadConnections();
+        savedConnectionsEl.innerHTML = '<option value="">-- Select a saved connection --</option>';
+        connectionLabels.forEach(l => {
+          const option = document.createElement('option');
+          option.value = l;
+          option.textContent = l;
+          savedConnectionsEl.appendChild(option);
+        });
+        
+      } catch (err) {
+        console.error('Failed to delete connection:', err);
+        alert('Failed to delete connection');
+      }
+    });
+  }
 
   // Send message form logic
   const sendForm = document.getElementById('send-form');
