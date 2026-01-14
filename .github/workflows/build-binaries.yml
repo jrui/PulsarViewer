@@ -55,18 +55,39 @@ jobs:
         if: runner.os == 'Windows'
         run: dir dist\
 
-      - name: Upload Release Assets
+      - name: Upload macOS artifacts
+        if: runner.os == 'macOS' && (startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch')
         uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: |
+            dist/*.dmg
+            dist/*.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Linux artifacts
+        if: runner.os == 'Linux' && (startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch')
+        uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           files: |
             dist/*.AppImage
             dist/*.deb
-            dist/*.dmg
-            dist/*.zip
-            dist/*.exe
-            dist/**/*.exe
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Windows artifacts
+        if: runner.os == 'Windows' && (startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch')
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: |
+            dist/*Setup*.exe
           draft: false
           prerelease: false
         env:
