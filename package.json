@@ -4,7 +4,10 @@
   "description": "A Typescript way to read Pulsar topics",
   "main": "dist/main.js",
   "homepage": "https://github.com/jrui/PulsarViewer",
-  "author": "jrui",
+  "author": {
+    "name": "jrui",
+    "email": "jrsm-github@outlook.com"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "nodemon --watch src --exec ts-node src/index.ts",
