@@ -15,45 +15,64 @@ let server: any;
 // Auto-updater configuration
 autoUpdater.autoDownload = false;
 autoUpdater.autoInstallOnAppQuit = true;
+autoUpdater.logger = console;
+
+autoUpdater.on('checking-for-update', () => {
+	console.log('Checking for updates...');
+});
 
 autoUpdater.on('update-available', (info) => {
-	dialog.showMessageBox(mainWindow!, {
-		type: 'info',
-		title: 'Update Available',
-		message: `A new version (${info.version}) is available!`,
-		detail: 'Would you like to download and install it now?',
-		buttons: ['Download', 'Later'],
-		defaultId: 0,
-		cancelId: 1,
-	}).then((result) => {
-		if (result.response === 0) {
-			autoUpdater.downloadUpdate();
-		}
-	});
+	console.log('Update available:', info.version);
+	if (mainWindow) {
+		dialog.showMessageBox(mainWindow, {
+			type: 'info',
+			title: 'Update Available',
+			message: `A new version (${info.version}) is available!`,
+			detail: 'Would you like to download and install it now?',
+			buttons: ['Download', 'Later'],
+			defaultId: 0,
+			cancelId: 1,
+		}).then((result) => {
+			if (result.response === 0) {
+				autoUpdater.downloadUpdate();
+			}
+		});
+	}
+});
+
+autoUpdater.on('update-not-available', (info) => {
+	console.log('Update not available. Current version is the latest:', info.version);
 });
 
 autoUpdater.on('update-downloaded', () => {
-	dialog.showMessageBox(mainWindow!, {
-		type: 'info',
-		title: 'Update Ready',
-		message: 'Update downloaded successfully!',
-		detail: 'The application will restart to install the update.',
-		buttons: ['Restart Now', 'Later'],
-		defaultId: 0,
-		cancelId: 1,
-	}).then((result) => {
-		if (result.response === 0) {
-			autoUpdater.quitAndInstall();
-		}
-	});
+	console.log('Update downloaded');
+	if (mainWindow) {
+		dialog.showMessageBox(mainWindow, {
+			type: 'info',
+			title: 'Update Ready',
+			message: 'Update downloaded successfully!',
+			detail: 'The application will restart to install the update.',
+			buttons: ['Restart Now', 'Later'],
+			defaultId: 0,
+			cancelId: 1,
+		}).then((result) => {
+			if (result.response === 0) {
+				autoUpdater.quitAndInstall();
+			}
+		});
+	}
 });
 
 autoUpdater.on('error', (err) => {
 	console.error('Update error:', err);
+	if (mainWindow && app.isPackaged) {
+		dialog.showErrorBox('Update Error', 'Failed to check for updates: ' + err.message);
+	}
 });
 
 autoUpdater.on('download-progress', (progressObj) => {
-	console.log(`Download progress: ${progressObj.percent}%`);
+	const logMessage = `Download progress: ${Math.round(progressObj.percent)}% (${progressObj.transferred}/${progressObj.total})`;
+	console.log(logMessage);
 });
 
 // Setup Express middleware
@@ -297,6 +316,20 @@ app.on('ready', () => {
 		return { success: true };
 	});
 
+	// Manual update check handler
+	ipcMain.handle('check-for-updates', async () => {
+		if (!app.isPackaged) {
+			return { available: false, message: 'Updates only available in production builds' };
+		}
+		try {
+			const result = await autoUpdater.checkForUpdates();
+			return { available: true, updateInfo: result?.updateInfo };
+		} catch (error: any) {
+			console.error('Update check failed:', error);
+			return { available: false, error: error.message };
+		}
+	});
+
 	// Start Express server
 	server = expressApp.listen(3000, () => {
 		console.log('Express server running on http://localhost:3000');
@@ -307,11 +340,24 @@ app.on('ready', () => {
 		createWindow();
 		
 		// Check for updates after window is created
-		setTimeout(() => {
-			if (app.isPackaged) {
-				autoUpdater.checkForUpdates();
-			}
-		}, 3000); // Wait 3 seconds after window creation
+		if (app.isPackaged) {
+			setTimeout(() => {
+				console.log('Starting initial update check...');
+				autoUpdater.checkForUpdates().catch(err => {
+					console.error('Failed to check for updates:', err);
+				});
+			}, 3000);
+			
+			// Check for updates every 4 hours
+			setInterval(() => {
+				console.log('Performing periodic update check...');
+				autoUpdater.checkForUpdates().catch(err => {
+					console.error('Failed to check for updates:', err);
+				});
+			}, 4 * 60 * 60 * 1000);
+		} else {
+			console.log('Update checks disabled in development mode');
+		}
 	}, 500);
 });
 

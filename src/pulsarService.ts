@@ -1,3 +1,5 @@
+import Pulsar from 'pulsar-client';
+
 export interface ProducerConfig {
   serviceUrl: string;
   token?: string;
@@ -18,11 +20,13 @@ export class PulsarProducerWrapper {
   constructor(private cfg: ProducerConfig) {}
 
   async connect(): Promise<void> {
-    const { serviceUrl, token, topic, verbose } = this.cfg;
-    this.client = new Pulsar.Client({
-      serviceUrl,
-      authentication: token ? new Pulsar.AuthenticationToken({ token }) : undefined,
-    });
+    const { serviceUrl, topic, verbose } = this.cfg;
+    const token = this.cfg.token?.trim();
+    const clientConfig: any = { serviceUrl };
+    if (token) {
+      clientConfig.authentication = new Pulsar.AuthenticationToken({ token });
+    }
+    this.client = new Pulsar.Client(clientConfig);
     this.producer = await this.client.createProducer({ topic });
     if (verbose) {
       const sanitizedToken = token ? token.slice(0, 4) + '...' + token.slice(-4) : undefined;
@@ -50,7 +54,6 @@ export class PulsarProducerWrapper {
     try { await this.client?.close(); } catch {}
   }
 }
-import Pulsar from 'pulsar-client';
 
 export interface PulsarMessageInfo {
   id: string;
@@ -81,12 +84,14 @@ export class PulsarConsumerWrapper {
   constructor(private cfg: ConsumerConfig) {}
 
   async connect(): Promise<void> {
-    const { serviceUrl, token } = this.cfg;
+    const { serviceUrl } = this.cfg;
+    const token = this.cfg.token?.trim();
     try {
-      this.client = new Pulsar.Client({
-        serviceUrl,
-        authentication: token ? new Pulsar.AuthenticationToken({ token }) : undefined,
-      });
+      const clientConfig: any = { serviceUrl };
+      if (token) {
+        clientConfig.authentication = new Pulsar.AuthenticationToken({ token });
+      }
+      this.client = new Pulsar.Client(clientConfig);
 
       const subType = this.mapSubscriptionType(this.cfg.subscriptionType);
       const subMode = this.mapSubscriptionMode(this.cfg.subscriptionMode);

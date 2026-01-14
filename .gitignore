@@ -4,3 +4,6 @@ node_modules
 dist
 PulsarViewer-*
 release/
+.env
+*.p12
+*.pfx
