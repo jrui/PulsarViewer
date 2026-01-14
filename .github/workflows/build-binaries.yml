@@ -47,8 +47,13 @@ jobs:
       - name: Build
         run: npm run build:electron
 
-      - name: List built files
+      - name: List built files (Unix)
+        if: runner.os != 'Windows'
         run: ls -la dist/
+
+      - name: List built files (Windows)
+        if: runner.os == 'Windows'
+        run: dir dist\
 
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v1

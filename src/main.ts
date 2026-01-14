@@ -229,6 +229,20 @@ function createWindow() {
 	if (process.env.NODE_ENV === 'development') {
 		mainWindow.webContents.openDevTools();
 	}
+
+	// Add keyboard shortcut to toggle DevTools (Cmd+Option+I on Mac, Ctrl+Shift+I on Windows/Linux)
+	mainWindow.webContents.on('before-input-event', (event, input) => {
+		if (input.type === 'keyDown') {
+			const isMac = process.platform === 'darwin';
+			const toggleDevTools = isMac
+				? input.meta && input.alt && input.key.toLowerCase() === 'i'
+				: input.control && input.shift && input.key.toLowerCase() === 'i';
+			
+			if (toggleDevTools) {
+				mainWindow?.webContents.toggleDevTools();
+			}
+		}
+	});
 }
 
 app.on('ready', () => {
