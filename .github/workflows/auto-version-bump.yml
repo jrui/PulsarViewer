@@ -46,9 +46,11 @@ jobs:
       - name: Bump patch version
         if: steps.check-version.outputs.skip == 'false'
         run: |
-          # Configure npm to use 'v' prefix for tags
-          npm config set tag-version-prefix "v"
-          npm version patch -m "chore bump version to %s [skip ci]"
+          # Bump version without creating a tag (tag will be created after merge)
+          npm version patch --no-git-tag-version
+          VERSION=$(node -p "require('./package.json').version")
+          git add package.json package-lock.json
+          git commit -m "chore: bump version to $VERSION [skip ci]"
 
       - name: Push version bump to PR
         if: steps.check-version.outputs.skip == 'false'
@@ -56,4 +58,3 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git push https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.event.pull_request.head.repo.full_name }}.git HEAD:${{ github.event.pull_request.head.ref }}
-          git push https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.event.pull_request.head.repo.full_name }}.git --tags

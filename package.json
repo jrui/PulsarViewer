@@ -1,9 +1,10 @@
 {
   "name": "pulsarviewer",
-  "version": "2.0.2",
+  "version": "2.0.4",
   "description": "A Typescript way to read Pulsar topics",
   "main": "dist/main.js",
   "homepage": "https://github.com/jrui/PulsarViewer",
+  "author": "jrui",
   "scripts": {
     "build": "tsc",
     "dev": "nodemon --watch src --exec ts-node src/index.ts",
@@ -20,7 +21,6 @@
     "apache",
     "messaging"
   ],
-  "author": "jrui",
   "license": "ISC",
   "build": {
     "appId": "com.pulsarviewer.app",
