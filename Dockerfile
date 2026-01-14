@@ -1,6 +1,9 @@
 FROM node:22.15.0-alpine AS builder
 WORKDIR /app
 
+# Install build dependencies for native modules
+RUN apk add --no-cache python3 make g++ cmake
+
 # Install build-time dependencies
 COPY package*.json ./
 RUN npm install
@@ -11,6 +14,9 @@ RUN npm run build
 
 FROM node:22.15.0-alpine AS runner
 WORKDIR /app
+
+# Install runtime dependencies for native modules
+RUN apk add --no-cache python3 make g++ cmake
 
 # Install only runtime dependencies
 COPY package*.json ./
