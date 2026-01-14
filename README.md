@@ -9,6 +9,7 @@ A lightweight TypeScript + Express web UI to quickly inspect payloads from an Ap
 Download the latest desktop application for your platform:
 
 - **[macOS (DMG)](https://github.com/jrui/PulsarViewer/releases/latest)** - Download PulsarViewer-*.dmg
+	- Note: You may need to open the app with `xattr -cr /Applications/PulsarViewer.app && open -a PulsarViewer` the first time
 - **[Linux (AppImage)](https://github.com/jrui/PulsarViewer/releases/latest)** - Download PulsarViewer-*.AppImage
 - **[Windows (EXE)](https://github.com/jrui/PulsarViewer/releases/latest)** - Download PulsarViewer-*.exe
 

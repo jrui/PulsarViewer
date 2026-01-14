@@ -25,7 +25,11 @@ export class PulsarProducerWrapper {
     const clientConfig: any = { serviceUrl };
     if (token) {
       clientConfig.authentication = new Pulsar.AuthenticationToken({ token });
+      console.log('[PulsarProducerWrapper] Using authentication with token:', token.slice(0, 8) + '...');
+    } else {
+      console.log('[PulsarProducerWrapper] No token provided, connecting without authentication');
     }
+    console.log('[PulsarProducerWrapper] Connecting to:', serviceUrl);
     this.client = new Pulsar.Client(clientConfig);
     this.producer = await this.client.createProducer({ topic });
     if (verbose) {
@@ -90,7 +94,13 @@ export class PulsarConsumerWrapper {
       const clientConfig: any = { serviceUrl };
       if (token) {
         clientConfig.authentication = new Pulsar.AuthenticationToken({ token });
+        console.log('[PulsarConsumerWrapper] Using authentication with token:', token.slice(0, 8) + '...');
+      } else {
+        console.log('[PulsarConsumerWrapper] No token provided, connecting without authentication');
       }
+      console.log('[PulsarConsumerWrapper] Connecting to:', serviceUrl);
+      console.log('[PulsarConsumerWrapper] Topic:', this.cfg.topic);
+      console.log('[PulsarConsumerWrapper] Subscription:', this.cfg.subscription);
       this.client = new Pulsar.Client(clientConfig);
 
       const subType = this.mapSubscriptionType(this.cfg.subscriptionType);

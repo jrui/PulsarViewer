@@ -1,6 +1,6 @@
 {
   "name": "pulsarviewer",
-  "version": "2.0.7",
+  "version": "2.0.10",
   "description": "A Typescript way to read Pulsar topics",
   "main": "dist/main.js",
   "homepage": "https://github.com/jrui/PulsarViewer",
@@ -25,6 +25,9 @@
     "messaging"
   ],
   "license": "ISC",
+  "engines": {
+    "node": ">=20.0.0 <21"
+  },
   "build": {
     "appId": "com.pulsarviewer.app",
     "productName": "PulsarViewer",
@@ -84,6 +87,7 @@
   },
   "dependencies": {
     "cors": "^2.8.5",
+    "electron-log": "^5.4.3",
     "electron-store": "^8.1.0",
     "electron-updater": "^6.7.3",
     "express": "^4.19.2",

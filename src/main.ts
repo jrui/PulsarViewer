@@ -1,10 +1,18 @@
 import { app, BrowserWindow, ipcMain, safeStorage, dialog } from 'electron';
 import { autoUpdater } from 'electron-updater';
+import log from 'electron-log';
 import path from 'path';
 import express, { Request, Response } from 'express';
 import cors from 'cors';
 import { PulsarConsumerWrapper, PulsarProducerWrapper } from './pulsarService';
 import Store from 'electron-store';
+
+// Configure logging
+log.transports.file.level = 'info';
+log.transports.console.level = 'info';
+log.transports.file.resolvePathFn = () => path.join(app.getPath('logs'), 'PulsarViewer', 'main.log');
+log.info('PulsarViewer starting...');
+log.info('Log file location:', log.transports.file.getFile().path);
 
 const store = new Store();
 
@@ -15,14 +23,14 @@ let server: any;
 // Auto-updater configuration
 autoUpdater.autoDownload = false;
 autoUpdater.autoInstallOnAppQuit = true;
-autoUpdater.logger = console;
+autoUpdater.logger = log;
 
 autoUpdater.on('checking-for-update', () => {
-	console.log('Checking for updates...');
+	log.info('Checking for updates...');
 });
 
 autoUpdater.on('update-available', (info) => {
-	console.log('Update available:', info.version);
+	log.info('Update available:', info.version);
 	if (mainWindow) {
 		dialog.showMessageBox(mainWindow, {
 			type: 'info',
@@ -41,11 +49,11 @@ autoUpdater.on('update-available', (info) => {
 });
 
 autoUpdater.on('update-not-available', (info) => {
-	console.log('Update not available. Current version is the latest:', info.version);
+	log.info('Update not available. Current version is the latest:', info.version);
 });
 
 autoUpdater.on('update-downloaded', () => {
-	console.log('Update downloaded');
+	log.info('Update downloaded');
 	if (mainWindow) {
 		dialog.showMessageBox(mainWindow, {
 			type: 'info',
@@ -64,7 +72,7 @@ autoUpdater.on('update-downloaded', () => {
 });
 
 autoUpdater.on('error', (err) => {
-	console.error('Update error:', err);
+	log.error('Update error:', err);
 	if (mainWindow && app.isPackaged) {
 		dialog.showErrorBox('Update Error', 'Failed to check for updates: ' + err.message);
 	}
@@ -72,7 +80,7 @@ autoUpdater.on('error', (err) => {
 
 autoUpdater.on('download-progress', (progressObj) => {
 	const logMessage = `Download progress: ${Math.round(progressObj.percent)}% (${progressObj.transferred}/${progressObj.total})`;
-	console.log(logMessage);
+	log.info(logMessage);
 });
 
 // Setup Express middleware
@@ -123,7 +131,7 @@ expressApp.post('/api/send', async (req: Request, res: Response) => {
 			message: 'Message sent successfully',
 		});
 	} catch (error: any) {
-		console.error('Error sending message:', error);
+		log.error('Error sending message:', error);
 		return res.status(400).json({
 			success: false,
 			error: error.message,
@@ -158,6 +166,7 @@ expressApp.get('/api/stream', async (req: Request, res: Response) => {
 
 	try {
 		await consumer.connect();
+		log.info('Consumer connected successfully');
 
 		// Set up message stream listener
 		(async () => {
@@ -178,13 +187,13 @@ expressApp.get('/api/stream', async (req: Request, res: Response) => {
 					};
 
 					if (verbose === '1') {
-						console.log(`[CONSUMER] Received message: ${JSON.stringify(data)}`);
+						log.info(`[CONSUMER] Received message: ${JSON.stringify(data)}`);
 					}
 
 					res.write(`data: ${JSON.stringify(data)}\n\n`);
 				}
 			} catch (error: any) {
-				console.error('Error in message stream:', error);
+				log.error('Error in message stream:', error);
 				if (!res.writableEnded) {
 					res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
 					res.end();
@@ -194,13 +203,14 @@ expressApp.get('/api/stream', async (req: Request, res: Response) => {
 
 		// Handle client disconnect
 		req.on('close', () => {
-			consumer.close().catch((error: any) => console.error('Error closing consumer:', error));
+			log.info('Client disconnected, closing consumer');
+			consumer.close().catch((error: any) => log.error('Error closing consumer:', error));
 		});
 	} catch (error: any) {
-		console.error('Error in stream endpoint:', error);
+		log.error('Error in stream endpoint:', error);
 		res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
 		res.end();
-		consumer.close().catch((error: any) => console.error('Error closing consumer:', error));
+		consumer.close().catch((error: any) => log.error('Error closing consumer:', error));
 	}
 });
 
@@ -339,14 +349,19 @@ app.on('ready', () => {
 			const result = await autoUpdater.checkForUpdates();
 			return { available: true, updateInfo: result?.updateInfo };
 		} catch (error: any) {
-			console.error('Update check failed:', error);
+			log.error('Update check failed:', error);
 			return { available: false, error: error.message };
 		}
 	});
 
+	// Get log file path
+	ipcMain.handle('get-log-file-path', () => {
+		return log.transports.file.getFile().path;
+	});
+
 	// Start Express server
 	server = expressApp.listen(3000, () => {
-		console.log('Express server running on http://localhost:3000');
+		log.info('Express server running on http://localhost:3000');
 	});
 
 	// Create window after server is ready
@@ -356,21 +371,21 @@ app.on('ready', () => {
 		// Check for updates after window is created
 		if (app.isPackaged) {
 			setTimeout(() => {
-				console.log('Starting initial update check...');
+				log.info('Starting initial update check...');
 				autoUpdater.checkForUpdates().catch(err => {
-					console.error('Failed to check for updates:', err);
+					log.error('Failed to check for updates:', err);
 				});
 			}, 3000);
 			
 			// Check for updates every 4 hours
 			setInterval(() => {
-				console.log('Performing periodic update check...');
+				log.info('Performing periodic update check...');
 				autoUpdater.checkForUpdates().catch(err => {
-					console.error('Failed to check for updates:', err);
+					log.error('Failed to check for updates:', err);
 				});
 			}, 4 * 60 * 60 * 1000);
 		} else {
-			console.log('Update checks disabled in development mode');
+			log.info('Update checks disabled in development mode');
 		}
 	}, 500);
 });
@@ -389,7 +404,7 @@ app.on('activate', () => {
 
 // Graceful shutdown
 const shutdown = (signal: string) => {
-	console.log(`Received ${signal}, starting graceful shutdown...`);
+	log.info(`Received ${signal}, starting graceful shutdown...`);
 
 	if (mainWindow) {
 		mainWindow.destroy();
@@ -397,7 +412,7 @@ const shutdown = (signal: string) => {
 
 	if (server) {
 		server.close(() => {
-			console.log('Server closed');
+			log.info('Server closed');
 			process.exit(0);
 		});
 	} else {
