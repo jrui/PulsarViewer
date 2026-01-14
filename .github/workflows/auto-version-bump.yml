@@ -45,7 +45,10 @@ jobs:
 
       - name: Bump patch version
         if: steps.check-version.outputs.skip == 'false'
-        run: npm version patch -m "chore bump version to %s [skip ci]"
+        run: |
+          # Configure npm to use 'v' prefix for tags
+          npm config set tag-version-prefix "v"
+          npm version patch -m "chore bump version to %s [skip ci]"
 
       - name: Push version bump to PR
         if: steps.check-version.outputs.skip == 'false'
