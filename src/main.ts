@@ -1,4 +1,5 @@
-import { app, BrowserWindow, ipcMain, safeStorage } from 'electron';
+import { app, BrowserWindow, ipcMain, safeStorage, dialog } from 'electron';
+import { autoUpdater } from 'electron-updater';
 import path from 'path';
 import express, { Request, Response } from 'express';
 import cors from 'cors';
@@ -10,6 +11,50 @@ const store = new Store();
 let mainWindow: BrowserWindow | null;
 const expressApp = express();
 let server: any;
+
+// Auto-updater configuration
+autoUpdater.autoDownload = false;
+autoUpdater.autoInstallOnAppQuit = true;
+
+autoUpdater.on('update-available', (info) => {
+	dialog.showMessageBox(mainWindow!, {
+		type: 'info',
+		title: 'Update Available',
+		message: `A new version (${info.version}) is available!`,
+		detail: 'Would you like to download and install it now?',
+		buttons: ['Download', 'Later'],
+		defaultId: 0,
+		cancelId: 1,
+	}).then((result) => {
+		if (result.response === 0) {
+			autoUpdater.downloadUpdate();
+		}
+	});
+});
+
+autoUpdater.on('update-downloaded', () => {
+	dialog.showMessageBox(mainWindow!, {
+		type: 'info',
+		title: 'Update Ready',
+		message: 'Update downloaded successfully!',
+		detail: 'The application will restart to install the update.',
+		buttons: ['Restart Now', 'Later'],
+		defaultId: 0,
+		cancelId: 1,
+	}).then((result) => {
+		if (result.response === 0) {
+			autoUpdater.quitAndInstall();
+		}
+	});
+});
+
+autoUpdater.on('error', (err) => {
+	console.error('Update error:', err);
+});
+
+autoUpdater.on('download-progress', (progressObj) => {
+	console.log(`Download progress: ${progressObj.percent}%`);
+});
 
 // Setup Express middleware
 expressApp.use(cors());
@@ -258,7 +303,16 @@ app.on('ready', () => {
 	});
 
 	// Create window after server is ready
-	setTimeout(() => createWindow(), 500);
+	setTimeout(() => {
+		createWindow();
+		
+		// Check for updates after window is created
+		setTimeout(() => {
+			if (app.isPackaged) {
+				autoUpdater.checkForUpdates();
+			}
+		}, 3000); // Wait 3 seconds after window creation
+	}, 500);
 });
 
 app.on('window-all-closed', () => {

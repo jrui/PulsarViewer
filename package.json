@@ -25,6 +25,11 @@
   "build": {
     "appId": "com.pulsarviewer.app",
     "productName": "PulsarViewer",
+    "publish": {
+      "provider": "github",
+      "owner": "jrui",
+      "repo": "PulsarViewer"
+    },
     "directories": {
       "buildResources": "public"
     },
@@ -46,6 +51,11 @@
         "deb"
       ],
       "icon": "public/pulsar_viewer_logo.png"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
     }
   },
   "devDependencies": {
@@ -65,6 +75,7 @@
   "dependencies": {
     "cors": "^2.8.5",
     "electron-store": "^8.1.0",
+    "electron-updater": "^6.7.3",
     "express": "^4.19.2",
     "pulsar-client": "^1.9.0"
   }

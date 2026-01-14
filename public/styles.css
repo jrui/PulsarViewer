@@ -231,6 +231,7 @@ form {
   flex-direction: column;
   min-width: 200px;
   flex: 1;
+  padding-right: 10px;
 }
 
 .field-inline {
