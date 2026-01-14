@@ -1,6 +1,6 @@
 {
   "name": "pulsarviewer",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "description": "A Typescript way to read Pulsar topics",
   "main": "dist/main.js",
   "homepage": "https://github.com/jrui/PulsarViewer",
