@@ -3,7 +3,25 @@ A lightweight TypeScript + Express web UI to quickly inspect payloads from an Ap
 
 
 
-## Local Pulsar Viewer
+## Installation Options
+
+### Desktop Apps
+Download the latest desktop application for your platform:
+
+- **[macOS (DMG)](https://github.com/jrui/PulsarViewer/releases/latest)** - Download PulsarViewer-*.dmg
+- **[Linux (AppImage)](https://github.com/jrui/PulsarViewer/releases/latest)** - Download PulsarViewer-*.AppImage
+- **[Windows (EXE)](https://github.com/jrui/PulsarViewer/releases/latest)** - Download PulsarViewer-*.exe
+
+Or browse all releases at [GitHub Releases](https://github.com/jrui/PulsarViewer/releases)
+
+**Installation:**
+- **macOS**: Open the DMG and drag PulsarViewer to Applications
+- **Linux**: Make the AppImage executable: `chmod +x PulsarViewer-*.AppImage` then run it
+- **Windows**: Run the installer EXE
+
+The desktop apps include a built-in web server and open automatically in a native window.
+
+### Docker
 Running locally with docker:
 ```sh
 docker pull ghcr.io/jrui/pulsarviewer:latest
@@ -34,9 +52,20 @@ docker run --rm -p 3000:3000 ghcr.io/jrui/pulsarviewer
 
 ## Local Development
 ```bash
+npm install
 npm run dev
-# Open http://localhost:3000
 ```
+This starts the Electron app in development mode with hot reload.
+
+## Building Desktop Apps
+To build installers locally:
+```bash
+npm run build:electron
+```
+This creates platform-specific installers in the `dist/` folder:
+- macOS: DMG and ZIP
+- Linux: AppImage and DEB
+- Windows: EXE installer
 
 
 
