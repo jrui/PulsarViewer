@@ -47,11 +47,21 @@ jobs:
       - name: Build
         run: npm run build:electron
 
+      - name: List built files
+        run: ls -la dist/
+
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         with:
-          files: dist/PulsarViewer-*
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: |
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.dmg
+            dist/*.zip
+            dist/*.exe
+            dist/**/*.exe
           draft: false
           prerelease: false
         env:
