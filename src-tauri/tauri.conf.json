@@ -1,6 +1,5 @@
 {
   "build": {
-    "beforeBuildCommand": "bash -c 'cd src/backend && go build -o pulsarviewer-backend ./cmd/main.go'",
     "beforeDevCommand": "bash -c 'cd src/backend && go run ./cmd/main.go'",
     "devPath": "http://localhost:3000",
     "distDir": "../public"
