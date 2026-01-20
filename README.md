@@ -1,33 +1,35 @@
 # Pulsar Viewer
-A lightweight TypeScript + Express web UI to quickly inspect payloads from an Apache Pulsar topic (read-only consumer). Connect using a service URL (broker or proxy), optional token authentication, and stream messages live via Server-Sent Events.
+A lightweight desktop application with Go backend and web UI to quickly inspect payloads from an Apache Pulsar topic (read-only consumer). Connect using a service URL (broker or proxy), optional token authentication, and stream messages live.
 
-
+## Architecture
+- **Frontend**: Pure HTML/CSS/JavaScript web UI
+- **Backend**: Go server with Apache Pulsar client
+- **Desktop**: Tauri (Rust) for native app wrapper
+- **Platforms**: macOS (universal), Linux (x64), Windows (x64)
 
 ## Installation Options
 
 ### Desktop Apps
 Download the latest desktop application for your platform:
 
-- **[macOS (DMG)](https://github.com/jrui/PulsarViewer/releases/latest)** - Download PulsarViewer-*.dmg
-	- Note: You may need to open the app with `xattr -cr /Applications/PulsarViewer.app && open -a PulsarViewer` the first time
-- **[Linux (AppImage)](https://github.com/jrui/PulsarViewer/releases/latest)** - Download PulsarViewer-*.AppImage
-- **[Windows (EXE)](https://github.com/jrui/PulsarViewer/releases/latest)** - Download PulsarViewer-*.exe
-
-Or browse all releases at [GitHub Releases](https://github.com/jrui/PulsarViewer/releases)
+- **[macOS (DMG)](https://github.com/jrui/PulsarViewer/releases/latest)** - Universal binary (Intel + Apple Silicon)
+- **[Linux (AppImage)](https://github.com/jrui/PulsarViewer/releases/latest)** - x86_64
+- **[Windows (MSI)](https://github.com/jrui/PulsarViewer/releases/latest)** - x64 installer
 
 **Installation:**
-- **macOS**: Open the DMG and drag PulsarViewer to Applications
-- **Linux**: Make the AppImage executable: `chmod +x PulsarViewer-*.AppImage` then run it
-- **Windows**: Run the installer EXE
+- **macOS**: Open the DMG and drag PulsarViewer to Applications. First launch: right-click → Open (app is unsigned)
+- **Linux**: Make executable: `chmod +x *.AppImage` then run it
+- **Windows**: Run the MSI installer
 
-The desktop apps include a built-in web server and open automatically in a native window.
+The desktop apps include the Go backend bundled inside and start automatically.
 
 ### Docker
-Running locally with docker:
+Running with Docker:
 ```sh
 docker pull ghcr.io/jrui/pulsarviewer:latest
 docker run --rm -p 3000:3000 ghcr.io/jrui/pulsarviewer
 ```
+Then open http://localhost:3000 in your browser.
 
 
 
@@ -45,28 +47,65 @@ docker run --rm -p 3000:3000 ghcr.io/jrui/pulsarviewer
 
 
 ## Requirements
-- Node.js 18+
+## Requirements
+- Go 1.22+ (for backend development)
+- Node.js 18+ (for Tauri CLI)
+- Rust 1.70+ (for building Tauri app)
 - Access to a Pulsar cluster (direct broker `pulsar://` or proxy / SSL `pulsar+ssl://`)
 - If using token authentication, a valid JWT
 
-
-
 ## Local Development
+
+### Run Backend + Frontend
 ```bash
-npm install
-npm run dev
+# Terminal 1: Start Go backend
+cd src/backend
+go run ./cmd/main.go
+
+# Backend runs on http://localhost:3000
+# Open in browser or continue to run desktop app
 ```
-This starts the Electron app in development mode with hot reload.
+
+### Run Tauri Desktop App
+```bash
+# Install dependencies
+npm install
+
+# Run in development mode
+npm run tauri:dev
+```
 
 ## Building Desktop Apps
-To build installers locally:
+
+### Prerequisites
 ```bash
-npm run build:electron
+# Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Install Node dependencies
+npm install
 ```
-This creates platform-specific installers in the `dist/` folder:
-- macOS: DMG and ZIP
-- Linux: AppImage and DEB
-- Windows: EXE installer
+
+### Build for your platform
+```bash
+# macOS universal (Intel + Apple Silicon)
+npm run tauri:build -- --target universal-apple-darwin
+
+# Linux x64
+npm run tauri:build -- --target x86_64-unknown-linux-gnu
+
+# Windows x64
+npm run tauri:build -- --target x86_64-pc-windows-msvc
+```
+
+Artifacts will be in `src-tauri/target/{target}/release/bundle/`
+
+### Automated Builds
+The GitHub Actions workflow automatically builds for all platforms when you push a tag:
+```bash
+git tag v2.0.16
+git push origin v2.0.16
+```
 
 
 
@@ -74,55 +113,15 @@ This creates platform-specific installers in the `dist/` folder:
 ### Viewing messages
 1. Enter Service URL (e.g. `pulsar://localhost:6650` or `pulsar+ssl://my.cluster:6651`)
 2. Enter fully qualified topic (e.g. `persistent://public/default/my-topic`)
-3. (Optional) Paste token (kept only in-memory; not stored)
+3. (Optional) Paste token (stored in browser localStorage for web, in-memory for desktop)
 4. Adjust subscription name / type if desired
-5. Click Connect – messages appear live
-6. Use Pause to temporarily stop rendering (messages still consumed)
-7. Use Clear to wipe current display
-8. Use Filter to show only messages containing specific text (supports regex with toggle)
-
+5. Click Connect – messages stream live
+6. Use Filter to show only messages containing specific text (supports regex with toggle)
 
 ### Sending messages
 1. Fill in Service URL, Topic, Payload, (optional) Key, Properties (JSON), and Token in the send form
 2. Click Send Message
 3. Success or error will be shown in the message log
-
-
-
-## SSE Endpoint (programmatic)
-## Producer API (programmatic)
-`POST /api/send`
-Body (JSON):
-```
-{
-	"serviceUrl": "pulsar+ssl://...:6651",
-	"topic": "persistent://gpd/trading-services/refresh",
-	"payload": "your message string",
-	"key": "optional-key",
-	"properties": { "foo": "bar" },
-	"token": "your JWT token"
-}
-```
-
-Response:
-```
-{ "ok": true, "messageId": "..." }
-```
-or
-```
-{ "error": "..." }
-```
-`GET /api/stream?serviceUrl=...&topic=...&subscription=viewer-sub&subscriptionType=Exclusive&initialPosition=earliest&verbose=1&token=...`
-
-Events emitted:
-- `info` – status messages
-- `message` – Pulsar message object `{ id, publishTime, eventTime, properties, key, data, json }`
-- `error` – connection / consumer errors
-
-Query params (optional):
-- `subscriptionType` one of Exclusive|Shared|Failover|KeyShared
-- `initialPosition` earliest|latest (default latest)
-- `verbose=1` includes stack traces / extra diagnostics
 
 
 

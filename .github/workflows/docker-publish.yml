@@ -1,8 +1,11 @@
 name: Build and Publish Docker image
 on:
   push:
+    tags:
+      - 'v*'
     branches:
       - master
+
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
@@ -26,10 +29,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Extract version
+        id: version
+        run: |
+          if [[ $GITHUB_REF == refs/tags/* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+            TAGS="ghcr.io/${{ github.repository_owner }}/pulsarviewer:$VERSION,ghcr.io/${{ github.repository_owner }}/pulsarviewer:latest"
+          else
+            TAGS="ghcr.io/${{ github.repository_owner }}/pulsarviewer:latest"
+          fi
+          echo "tags=$TAGS" >> $GITHUB_OUTPUT
+
       - name: Build and push multi-arch image
         uses: docker/build-push-action@v4
         with:
           context: .
+          file: ./Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
-          tags: ghcr.io/${{ github.repository_owner }}/pulsarviewer:latest
+          tags: ${{ steps.version.outputs.tags }}
+
