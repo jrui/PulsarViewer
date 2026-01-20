@@ -17,15 +17,14 @@
   <div id="layout" class="hidden">
   <section id="controls">
     <form id="connect-form" class="panel">
+      <button type="button" id="collapseBtn" class="collapse-btn" title="Collapse">‹</button>
+      <button type="button" id="expandBtn" class="expand-btn" title="Expand">›</button>
       <div class="field connection-manager">
         <label>Saved Connections</label>
-        <div style="display: flex; gap: 0.5rem; align-items: center;">
-          <select id="savedConnections" style="flex: 1;">
-            <option value="">-- Select a saved connection --</option>
-          </select>
-        </div>
+        <select id="savedConnections">
+          <option value="">-- Select a saved connection --</option>
+        </select>
       </div>
-      <div style="height: 1rem;"></div>
       <div class="field">
         <label>Service URL</label>
         <input type="text" id="serviceUrl" placeholder="pulsar://localhost:6650" required />
@@ -45,6 +44,13 @@
           <option value="Shared">Shared</option>
           <option value="Failover">Failover</option>
           <option value="KeyShared">KeyShared</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Initial Position</label>
+        <select id="initialPosition">
+          <option value="latest">Latest</option>
+          <option value="earliest">Earliest</option>
         </select>
       </div>
       <div class="field">
@@ -91,10 +97,7 @@
           <label>Filter</label>
           <input id="filter" placeholder="filter (show only messages containing this)" />
           <label class="checkbox"><input type="checkbox" id="useRegex" /> Use Regex</label>
-        <button type="button" id="pauseBtn">Pause</button>
-        <button type="button" id="clearBtn">Clear</button>
-        <label class="checkbox"><input type="checkbox" id="autoScroll" checked /> Auto-scroll</label>
-      </div>
+        </div>
       <div id="messages"></div>
     </section>
   </div>

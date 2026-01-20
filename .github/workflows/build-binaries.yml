@@ -1,4 +1,4 @@
-name: Build and Release Electron App
+name: Build and Release Tauri Desktop App
 
 on:
   push:
@@ -12,20 +12,22 @@ on:
         type: string
 
 jobs:
-  build:
+  build-tauri:
     strategy:
       matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
         include:
           - os: macos-latest
-            artifact_name: PulsarViewer-*.dmg
-            asset_name: PulsarViewer-macos.dmg
+            target: universal-apple-darwin
+            artifact_name: PulsarViewer_universal.dmg
+            artifact_path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
           - os: ubuntu-latest
-            artifact_name: PulsarViewer-*.AppImage
-            asset_name: PulsarViewer-linux.AppImage
+            target: x86_64-unknown-linux-gnu
+            artifact_name: pulsarviewer_amd64.AppImage
+            artifact_path: src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
           - os: windows-latest
-            artifact_name: PulsarViewer-*.exe
-            asset_name: PulsarViewer-windows.exe
+            target: x86_64-pc-windows-msvc
+            artifact_name: PulsarViewer_x64_en-US.msi
+            artifact_path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
 
     runs-on: ${{ matrix.os }}
 
@@ -39,58 +41,67 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
-      - name: Build
-        run: npm run build:electron
+      - name: Install Rust targets (macOS universal)
+        if: matrix.os == 'macos-latest'
+        run: |
+          rustup target add aarch64-apple-darwin
+          rustup target add x86_64-apple-darwin
 
-      - name: List built files (Unix)
-        if: runner.os != 'Windows'
-        run: ls -la dist/
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.22'
 
-      - name: List built files (Windows)
-        if: runner.os == 'Windows'
-        run: dir dist\
+      - name: Install dependencies (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.0-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
 
-      - name: Upload macOS artifacts
-        if: runner.os == 'macOS' && (startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch')
+      - name: Build Go backend (macOS universal)
+        if: matrix.os == 'macos-latest'
+        run: |
+          cd src/backend
+          GOOS=darwin GOARCH=amd64 go build -o pulsarviewer-backend-x86_64 ./cmd/main.go
+          GOOS=darwin GOARCH=arm64 go build -o pulsarviewer-backend-aarch64 ./cmd/main.go
+          lipo -create pulsarviewer-backend-x86_64 pulsarviewer-backend-aarch64 -output pulsarviewer-backend
+          rm pulsarviewer-backend-x86_64 pulsarviewer-backend-aarch64
+          chmod +x pulsarviewer-backend
+
+      - name: Build Go backend (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          cd src/backend
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o pulsarviewer-backend ./cmd/main.go
+          chmod +x pulsarviewer-backend
+
+      - name: Build Go backend (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          cd src/backend
+          $env:GOOS="windows"; $env:GOARCH="amd64"; $env:CGO_ENABLED="0"; go build -o pulsarviewer-backend.exe ./cmd/main.go
+
+      - name: Install npm dependencies
+        run: npm install
+
+      - name: Generate Tauri icons
+        run: npx @tauri-apps/cli icon public/pulsar_viewer_logo.png
+
+      - name: Build Tauri app
+        run: npm run tauri:build -- --target ${{ matrix.target }}
+
+      - name: Upload artifacts
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          files: |
-            dist/*.dmg
-            dist/*.zip
-            dist/latest-mac.yml
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload Linux artifacts
-        if: runner.os == 'Linux' && (startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch')
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          files: |
-            dist/*.AppImage
-            dist/*.deb
-            dist/latest-linux.yml
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload Windows artifacts
-        if: runner.os == 'Windows' && (startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch')
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          files: |
-            dist/*Setup*.exe
-            dist/latest.yml
+          files: ${{ matrix.artifact_path }}
           draft: false
           prerelease: false
         env:

@@ -49,7 +49,14 @@ jobs:
           # Bump version without creating a tag (tag will be created after merge)
           npm version patch --no-git-tag-version
           VERSION=$(node -p "require('./package.json').version")
-          git add package.json package-lock.json
+          
+          # Update Cargo.toml version
+          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
+          
+          # Update tauri.conf.json version
+          sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" src-tauri/tauri.conf.json
+          
+          git add package.json package-lock.json src-tauri/Cargo.toml src-tauri/tauri.conf.json
           git commit -m "chore: bump version to $VERSION [skip ci]"
 
       - name: Push version bump to PR
