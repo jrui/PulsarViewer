@@ -1,15 +1,18 @@
 name: Create Release Tag
 
 on:
-  push:
+  workflow_run:
+    workflows: ["Auto Version Bump"]
+    types:
+      - completed
     branches:
       - master
 
 jobs:
   create-tag:
     runs-on: ubuntu-latest
-    # Skip if commit message contains [skip ci]
-    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    # Only run if the version bump workflow succeeded
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     permissions:
       contents: write
     steps:
