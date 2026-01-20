@@ -9,20 +9,6 @@ A lightweight desktop application with Go backend and web UI to quickly inspect 
 
 ## Installation Options
 
-### Desktop Apps
-Download the latest desktop application for your platform:
-
-- **[macOS (DMG)](https://github.com/jrui/PulsarViewer/releases/latest)** - Universal binary (Intel + Apple Silicon)
-- **[Linux (AppImage)](https://github.com/jrui/PulsarViewer/releases/latest)** - x86_64
-- **[Windows (MSI)](https://github.com/jrui/PulsarViewer/releases/latest)** - x64 installer
-
-**Installation:**
-- **macOS**: Open the DMG and drag PulsarViewer to Applications. First launch: right-click → Open (app is unsigned)
-- **Linux**: Make executable: `chmod +x *.AppImage` then run it
-- **Windows**: Run the MSI installer
-
-The desktop apps include the Go backend bundled inside and start automatically.
-
 ### Docker
 Running with Docker:
 ```sh
