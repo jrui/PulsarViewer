@@ -1,32 +1,29 @@
-FROM node:22.15.0-alpine AS builder
+# Build stage
+FROM golang:1.22-alpine AS builder
+
+WORKDIR /build
+
+# Copy Go backend source
+COPY src/backend ./src/backend
+
+WORKDIR /build/src/backend
+
+# Build the backend
+RUN CGO_ENABLED=0 GOOS=linux go build -o pulsarviewer-backend ./cmd/main.go
+
+# Runtime stage
+FROM alpine:latest
+
 WORKDIR /app
 
-# Install build dependencies for native modules
-RUN apk add --no-cache python3 make g++ cmake
+# Copy built binary from builder
+COPY --from=builder /build/src/backend/pulsarviewer-backend /app/
 
-# Install build-time dependencies
-COPY package*.json ./
-RUN npm install
+# Copy web UI
+COPY src/backend/public /app/public
 
-# Copy sources and build
-COPY . ./
-RUN npm run build
+# Expose ports
+EXPOSE 3000 50051
 
-FROM node:22.15.0-alpine AS runner
-WORKDIR /app
-
-# Install runtime dependencies for native modules
-RUN apk add --no-cache python3 make g++ cmake
-
-# Install only runtime dependencies
-COPY package*.json ./
-ENV NODE_ENV=production
-RUN npm ci --only=production
-
-# Copy compiled output from builder stage
-COPY --from=builder /app/dist ./dist
-# Copy static public assets so the server can serve '/'
-COPY --from=builder /app/public ./public
-
-EXPOSE 3000
-CMD ["node", "dist/index.js"]
+# Run the backend
+CMD ["./pulsarviewer-backend"]

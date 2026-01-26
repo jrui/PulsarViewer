@@ -1,0 +1,56 @@
+{
+  "build": {
+    "beforeDevCommand": "bash -c 'cd src/backend && go run ./cmd/main.go'",
+    "devPath": "http://localhost:3000",
+    "distDir": "../public"
+  },
+  "package": {
+    "productName": "PulsarViewer",
+    "version": "3.0.3"
+  },
+  "tauri": {
+    "allowlist": {
+      "all": false,
+      "shell": {
+        "all": false,
+        "open": true,
+        "sidecar": true,
+        "scope": [
+          {
+            "name": "pulsarviewer-backend",
+            "sidecar": true
+          }
+        ]
+      }
+    },
+    "bundle": {
+      "active": true,
+      "targets": [
+        "dmg",
+        "app"
+      ],
+      "identifier": "com.pulsarviewer.app",
+      "icon": [
+        "icons/32x32.png",
+        "icons/128x128.png",
+        "icons/128x128@2x.png",
+        "icons/icon.icns",
+        "icons/icon.ico"
+      ],
+      "resources": [
+        "../src/backend/pulsarviewer-backend",
+        "../public"
+      ]
+    },
+    "windows": [
+      {
+        "title": "PulsarViewer",
+        "width": 1400,
+        "height": 900,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ]
+  }
+}
+

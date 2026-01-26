@@ -1,101 +1,31 @@
 {
   "name": "pulsarviewer",
-  "version": "2.0.15",
-  "description": "A Typescript way to read Pulsar topics",
-  "main": "dist/main.js",
+  "version": "3.0.3",
+  "description": "A lightweight Pulsar message viewer with Go backend",
   "homepage": "https://github.com/jrui/PulsarViewer",
   "author": {
     "name": "jrui",
     "email": "jrsm-github@outlook.com"
   },
   "scripts": {
-    "build": "tsc",
-    "dev": "nodemon --watch src --exec ts-node src/index.ts",
-    "start": "node dist/index.js",
-    "rebuild": "electron-rebuild -f -w pulsar-client",
-    "dev:electron": "concurrently \"tsc --watch\" \"wait-on dist/main.js && electron dist/main.js\"",
-    "start:electron": "electron dist/main.js",
-    "build:electron": "npm run build && electron-builder --publish never",
-    "build:electron:publish": "npm run build && electron-builder --publish always"
+    "dev": "cd src/backend && go run ./cmd/main.go",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
   "keywords": [
     "pulsar",
     "viewer",
-    "typescript",
+    "go",
     "apache",
     "messaging"
   ],
   "license": "ISC",
   "engines": {
-    "node": ">=20.0.0 <21"
-  },
-  "build": {
-    "appId": "com.pulsarviewer.app",
-    "productName": "PulsarViewer",
-    "publish": {
-      "provider": "github",
-      "owner": "jrui",
-      "repo": "PulsarViewer"
-    },
-    "directories": {
-      "buildResources": "public"
-    },
-    "files": [
-      "dist/**/*",
-      "public/**/*"
-    ],
-    "asarUnpack": [
-      "**/node_modules/pulsar-client/**/*"
-    ],
-    "mac": {
-      "target": [
-        "dmg",
-        "zip"
-      ],
-      "icon": "public/pulsar_viewer_logo.png",
-      "category": "public.app-category.utilities",
-      "hardenedRuntime": true,
-      "gatekeeperAssess": false,
-      "entitlements": "entitlements.mac.plist",
-      "entitlementsInherit": "entitlements.mac.inherit.plist",
-      "notarize": {
-        "teamId": "${APPLE_TEAM_ID}"
-      }
-    },
-    "linux": {
-      "target": [
-        "AppImage",
-        "deb"
-      ],
-      "icon": "public/pulsar_viewer_logo.png"
-    },
-    "win": {
-      "target": [
-        "nsis"
-      ]
-    }
+    "go": ">=1.22.0"
   },
   "devDependencies": {
-    "@types/cors": "^2.8.17",
-    "@types/express": "^4.17.21",
-    "@types/node": "^20.11.30",
-    "concurrently": "^8.2.2",
-    "electron": "^27.0.0",
-    "electron-builder": "^24.6.4",
-    "electron-rebuild": "^3.2.9",
-    "esbuild": "^0.27.2",
-    "nodemon": "^3.1.10",
-    "ts-node": "^10.9.2",
-    "tsconfig-paths": "^4.2.0",
-    "typescript": "^5.8.3",
-    "wait-on": "^7.0.1"
-  },
-  "dependencies": {
-    "cors": "^2.8.5",
-    "electron-log": "^5.4.3",
-    "electron-store": "^8.1.0",
-    "electron-updater": "^6.7.3",
-    "express": "^4.19.2",
-    "pulsar-client": "^1.9.0"
+    "@tauri-apps/cli": "^1.5.0",
+    "@tauri-apps/api": "^1.5.0"
   }
 }
