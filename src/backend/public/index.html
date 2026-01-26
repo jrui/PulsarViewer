@@ -17,15 +17,14 @@
   <div id="layout" class="hidden">
   <section id="controls">
     <form id="connect-form" class="panel">
+      <button type="button" id="collapseBtn" class="collapse-btn" title="Collapse">‹</button>
+      <button type="button" id="expandBtn" class="expand-btn" title="Expand">›</button>
       <div class="field connection-manager">
         <label>Saved Connections</label>
-        <div style="display: flex; gap: 0.5rem; align-items: center;">
-          <select id="savedConnections" style="flex: 1;">
-            <option value="">-- Select a saved connection --</option>
-          </select>
-        </div>
+        <select id="savedConnections">
+          <option value="">-- Select a saved connection --</option>
+        </select>
       </div>
-      <div style="height: 1rem;"></div>
       <div class="field">
         <label>Service URL</label>
         <input type="text" id="serviceUrl" placeholder="pulsar://localhost:6650" required />
@@ -98,6 +97,7 @@
           <label>Filter</label>
           <input id="filter" placeholder="filter (show only messages containing this)" />
           <label class="checkbox"><input type="checkbox" id="useRegex" /> Use Regex</label>
+          <button type="button" id="clearBtn" style="padding: 0.4rem 0.8rem; margin-left: 0.5rem; background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.85rem;">Clear</button>
         </div>
       <div id="messages"></div>
     </section>

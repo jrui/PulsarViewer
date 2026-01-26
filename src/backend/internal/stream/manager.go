@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -107,6 +108,15 @@ func (s *Stream) streamOnce() {
 	})
 
 	if err != nil {
+		// If error is fatal (e.g., invalid topic, permissions), do not keep retrying
+		if isFatalPulsarError(err) {
+			log.Printf("Fatal stream error for %s:%s: %v", s.key.ServiceURL, s.key.Topic, err)
+			s.publishSystemError(fmt.Sprintf("Stream failed: %v", err))
+			// Cancel the stream to stop run() loop
+			s.cancel()
+			return
+		}
+
 		s.mu.Lock()
 		s.retryCount++
 		retryCount = s.retryCount
@@ -114,6 +124,9 @@ func (s *Stream) streamOnce() {
 
 		if retryCount > 10 {
 			log.Printf("Stream %s:%s exceeded max retries: %v", s.key.ServiceURL, s.key.Topic, err)
+			s.publishSystemError(fmt.Sprintf("Stream exceeded max retries: %v", err))
+			// Stop retrying by cancelling context so run() exits
+			s.cancel()
 			return
 		}
 
@@ -162,6 +175,54 @@ func (s *Stream) streamOnce() {
 
 	// Channel closed, will reconnect on next loop iteration
 	log.Printf("Message channel closed for %s:%s, reconnecting...", s.key.ServiceURL, s.key.Topic)
+}
+
+// isFatalPulsarError attempts to determine if the error indicates a non-retryable condition
+// such as invalid topic name or missing permissions.
+func isFatalPulsarError(err error) bool {
+	if err == nil {
+		return false
+	}
+	e := strings.ToLower(err.Error())
+	fatalHints := []string{
+		"invalid topic name",
+		"topic does not exist",
+		"not found",
+		"does not exist",
+		"unauthorized",
+		"authorization",
+		"permission",
+	}
+	for _, hint := range fatalHints {
+		if strings.Contains(e, hint) {
+			return true
+		}
+	}
+	return false
+}
+
+// publishSystemError pushes a synthetic system message to the global store so the frontend
+// can surface the failure cause even when no Pulsar messages are streaming.
+func (s *Stream) publishSystemError(msg string) {
+	if s.store == nil {
+		return
+	}
+	now := time.Now().UnixMilli()
+	sys := &store.Message{
+		ID:          fmt.Sprintf("system-%d", now),
+		PublishTime: now,
+		EventTime:   now,
+		Properties: map[string]string{
+			"type":         "system",
+			"level":        "error",
+			"serviceUrl":   s.key.ServiceURL,
+			"topic":        s.key.Topic,
+			"subscription": s.key.Subscription,
+		},
+		Key:     "system",
+		Payload: msg,
+	}
+	_ = s.store.Add(sys)
 }
 
 func (sm *StreamManager) Close() {

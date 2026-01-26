@@ -20,7 +20,7 @@ WORKDIR /app
 COPY --from=builder /build/src/backend/pulsarviewer-backend /app/
 
 # Copy web UI
-COPY public /app/public
+COPY src/backend/public /app/public
 
 # Expose ports
 EXPOSE 3000 50051

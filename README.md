@@ -1,14 +1,18 @@
 # Pulsar Viewer
 A lightweight desktop application with Go backend and web UI to quickly inspect payloads from an Apache Pulsar topic (read-only consumer). Connect using a service URL (broker or proxy), optional token authentication, and stream messages live.
 
+<br>
+<br>
+
 ## Architecture
 - **Frontend**: Pure HTML/CSS/JavaScript web UI
 - **Backend**: Go server with Apache Pulsar client
 - **Desktop**: Tauri (Rust) for native app wrapper
-- **Platforms**: macOS (universal), Linux (x64), Windows (x64)
+
+<br>
+<br>
 
 ## Installation Options
-
 ### Docker
 Running with Docker:
 ```sh
@@ -17,31 +21,10 @@ docker run --rm -p 3000:3000 ghcr.io/jrui/pulsarviewer
 ```
 Then open http://localhost:3000 in your browser.
 
-
-
-## Features
-- Live streaming of messages (SSE)
-- Send messages to Pulsar topics (producer)
-- Auto JSON parsing (raw retained if invalid)
-- View message metadata (id, publish time, key, properties)
-- Auto-scroll toggle & pause
-- Clear messages & running counter
-- Supports Exclusive/Shared/Failover/KeyShared subscription types
-- Client-side message filtering with substring or regex matching
-- Dynamic filter updates without reconnection
-
-
-
-## Requirements
-## Requirements
-- Go 1.22+ (for backend development)
-- Node.js 18+ (for Tauri CLI)
-- Rust 1.70+ (for building Tauri app)
-- Access to a Pulsar cluster (direct broker `pulsar://` or proxy / SSL `pulsar+ssl://`)
-- If using token authentication, a valid JWT
+<br>
+<br>
 
 ## Local Development
-
 ### Run Backend + Frontend
 ```bash
 # Terminal 1: Start Go backend
@@ -52,6 +35,8 @@ go run ./cmd/main.go
 # Open in browser or continue to run desktop app
 ```
 
+<br>
+
 ### Run Tauri Desktop App
 ```bash
 # Install dependencies
@@ -61,8 +46,10 @@ npm install
 npm run tauri:dev
 ```
 
-## Building Desktop Apps
+<br>
+<br>
 
+## Building Desktop Apps
 ### Prerequisites
 ```bash
 # Install Rust
@@ -71,6 +58,8 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 # Install Node dependencies
 npm install
 ```
+
+<br>
 
 ### Build for your platform
 ```bash
@@ -86,14 +75,8 @@ npm run tauri:build -- --target x86_64-pc-windows-msvc
 
 Artifacts will be in `src-tauri/target/{target}/release/bundle/`
 
-### Automated Builds
-The GitHub Actions workflow automatically builds for all platforms when you push a tag:
-```bash
-git tag v2.0.16
-git push origin v2.0.16
-```
-
-
+<br>
+<br>
 
 ## Usage (UI)
 ### Viewing messages
@@ -104,12 +87,15 @@ git push origin v2.0.16
 5. Click Connect – messages stream live
 6. Use Filter to show only messages containing specific text (supports regex with toggle)
 
+<br>
+
 ### Sending messages
 1. Fill in Service URL, Topic, Payload, (optional) Key, Properties (JSON), and Token in the send form
 2. Click Send Message
 3. Success or error will be shown in the message log
 
-
+<br>
+<br>
 
 ---
 Made with ❤️ for quick troubleshooting.

@@ -94,6 +94,18 @@
   const labelModalInput = document.getElementById('labelModalInput');
   const labelModalSave = document.getElementById('labelModalSave');
   const labelModalCancel = document.getElementById('labelModalCancel');
+  const collapseBtn = document.getElementById('collapseBtn');
+  const expandBtn = document.getElementById('expandBtn');
+  const clearBtn = document.getElementById('clearBtn');
+  // Create floating expander overlay to keep expand button clickable above layouts
+  let expanderContainer = null;
+  if (expandBtn) {
+    expanderContainer = document.createElement('div');
+    expanderContainer.id = 'connect-expander';
+    document.body.appendChild(expanderContainer);
+    // Move expand button to the overlay container so it is outside the controls stacking context
+    expanderContainer.appendChild(expandBtn);
+  }
 
   let evtSource = null;
   let connectionId = null; // Unique connection ID from backend
@@ -331,6 +343,16 @@
       return;
     }
 
+    // Update arrow buttons to connected state
+    if (collapseBtn) {
+      collapseBtn.classList.remove('disconnected');
+      collapseBtn.classList.add('connected');
+    }
+    if (expandBtn) {
+      expandBtn.classList.remove('disconnected');
+      expandBtn.classList.add('connected');
+    }
+
     addMessage('info', 'Opening stream...', true);
     
     // Build query string with parameters
@@ -508,6 +530,29 @@
     connectBtn.disabled = false;
     disconnectBtn.disabled = true;
     
+    // Update arrow buttons to disconnected state
+    if (collapseBtn) {
+      collapseBtn.classList.remove('connected');
+      collapseBtn.classList.add('disconnected');
+    }
+    if (expandBtn) {
+      expandBtn.classList.remove('connected');
+      expandBtn.classList.add('disconnected');
+    }
+    
+    // Only expand form if user manually disconnected
+    if (userInitiated && form) {
+      form.classList.remove('minimized');
+      document.body.classList.remove('form-minimized');
+    }
+    
+    // Show connection dropped toast
+    if (userInitiated) {
+      addMessage('info', '🔌 Disconnected', true);
+    } else {
+      addMessage('warning', '⚠️ Connection dropped', true);
+    }
+    
     // Auto-reconnect if not user-initiated disconnect
     if (!userInitiated) {
       setTimeout(() => {
@@ -560,11 +605,72 @@
     });
   }
 
+  // Clear messages button
+  if (clearBtn) {
+    clearBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      try {
+        const response = await fetch('/api/clear', { method: 'POST' });
+        if (!response.ok) {
+          throw new Error('Failed to clear messages');
+        }
+        // Clear UI state
+        messagesEl.innerHTML = '';
+        counterEl.textContent = '0 messages';
+        totalBackendMessages = 0;
+        previousBackendCount = 0;
+        currentPage = 0;
+        filterEl.value = '';
+        useRegexEl.checked = false;
+        currentFilterValue = '';
+        currentUseRegex = false;
+        isSearchActive = false;
+        paginationEl.style.display = 'none';
+        statsEl.style.display = 'none';
+        addMessage('info', 'Messages cleared', true);
+      } catch (err) {
+        addMessage('error', `Failed to clear messages: ${err.message}`, true);
+      }
+    });
+  }
+
   form.addEventListener('submit', e => {
     e.preventDefault();
     connect();
   });
   disconnectBtn.addEventListener('click', () => disconnect(true));
+
+  // Helper function to set form height CSS variable
+  function updateFormHeightVariable() {
+    if (form) {
+      const height = form.offsetHeight;
+      document.documentElement.style.setProperty('--connect-form-height', `${height}px`);
+    }
+  }
+
+  // Update height variable on load and resize
+  updateFormHeightVariable();
+  window.addEventListener('resize', updateFormHeightVariable);
+
+  // Collapse/Expand Connect Form
+  if (collapseBtn) {
+    collapseBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      updateFormHeightVariable();
+      form.classList.add('minimized');
+      document.body.classList.add('form-minimized');
+    });
+  }
+
+  if (expandBtn) {
+    expandBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      form.classList.remove('minimized');
+      document.body.classList.remove('form-minimized');
+    });
+  }
 
   // Auto-load connection when selected from dropdown
   if (savedConnectionsEl) {

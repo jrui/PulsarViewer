@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -65,6 +66,8 @@ func NewHTTPHandler(pulsarClient *pulsar.ClientManager, messageStore *store.Mess
 
 	// Try multiple paths to find the public directory
 	possiblePaths := []string{
+		// From development in src/backend
+		"./public", // src/backend/public
 		// From Tauri macOS bundle structure
 		// The app structure is: PulsarViewer.app/Contents/Resources/_up_/src/backend/pulsarviewer-backend (binary)
 		// Public files are at: PulsarViewer.app/Contents/Resources/_up_/public/
@@ -74,13 +77,6 @@ func NewHTTPHandler(pulsarClient *pulsar.ClientManager, messageStore *store.Mess
 		// Alternative paths if structure is different
 		filepath.Join(exeDir, "../Resources/_up_/public"),
 		filepath.Join(exeDir, "../../Resources/_up_/public"),
-		// From development in src/backend
-		"../../public",
-		"../public",
-		// From project root
-		"./public",
-		// Direct reference
-		"public",
 	}
 
 	fmt.Printf("[Server] Executable path: %s\n", exePath)
@@ -110,6 +106,7 @@ func NewHTTPHandler(pulsarClient *pulsar.ClientManager, messageStore *store.Mess
 	mux.HandleFunc("/api/search", handler.handleSearch)
 	mux.HandleFunc("/api/stats", handler.handleGetStats)
 	mux.HandleFunc("/api/send", handler.handleSendMessage)
+	mux.HandleFunc("/api/clear", handler.handleClearMessages)
 
 	// WebSocket endpoint for streaming
 	mux.HandleFunc("/api/stream", handler.handleStream)
@@ -285,6 +282,21 @@ func (h *HTTPHandler) handleSendMessage(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+func (h *HTTPHandler) handleClearMessages(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	h.messageStore.Clear()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":      true,
+		"message": "Messages cleared",
+	})
+}
+
 type StreamRequest struct {
 	ServiceURL       string `json:"serviceUrl"`
 	Topic            string `json:"topic"`
@@ -396,6 +408,29 @@ func (h *HTTPHandler) handleWebSocketStream(conn *websocket.Conn, r *http.Reques
 		return
 	}
 
+	// Helper to classify fatal errors to avoid endless reconnects
+	isFatal := func(e error) bool {
+		if e == nil {
+			return false
+		}
+		le := strings.ToLower(e.Error())
+		fatalHints := []string{
+			"invalid topic name",
+			"topic does not exist",
+			"not found",
+			"does not exist",
+			"unauthorized",
+			"authorization",
+			"permission",
+		}
+		for _, h := range fatalHints {
+			if strings.Contains(le, h) {
+				return true
+			}
+		}
+		return false
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -440,6 +475,10 @@ func (h *HTTPHandler) handleWebSocketStream(conn *websocket.Conn, r *http.Reques
 
 	if err != nil {
 		conn.WriteJSON(StreamMessage{Type: "error", Data: err.Error()})
+		// Stop early on fatal misconfiguration to avoid noisy retries
+		if isFatal(err) {
+			return
+		}
 		return
 	}
 
@@ -472,6 +511,11 @@ func (h *HTTPHandler) handleWebSocketStream(conn *websocket.Conn, r *http.Reques
 					})
 					if err != nil {
 						conn.WriteJSON(StreamMessage{Type: "error", Data: map[string]string{"message": "Reconnect failed: " + err.Error()}})
+						if isFatal(err) {
+							// Stop reconnect loop on fatal errors
+							conn.WriteJSON(StreamMessage{Type: "info", Data: map[string]string{"message": "Stopping reconnects due to fatal error"}})
+							return
+						}
 					} else {
 						messageChan = newChan
 						conn.WriteJSON(StreamMessage{Type: "info", Data: map[string]string{"message": "Reconnected successfully"}})

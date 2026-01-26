@@ -131,14 +131,16 @@ body {
 #layout {
   display: flex;
   gap: 1.5rem;
-  padding: 1.5rem 2rem;
+  padding: 2rem 2rem 1.5rem 2rem;
   align-items: flex-start;
+  transition: padding 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 #layout2, #layout3 {
   display: inline-block;
   vertical-align: top;
   padding: 1.5rem 1rem;
+  transition: padding 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 #layout2 {
@@ -155,16 +157,39 @@ body {
   padding: 0 !important;
   background: transparent !important;
   flex: 1;
+  z-index: 0 !important;
 }
 
 #send-panel {
   position: sticky;
   top: 1.5rem;
   align-self: flex-start;
+  z-index: 1 !important;
 }
 
 #messages-section {
   flex: 1;
+}
+
+/* Adjust layout when connect-form is minimized */
+body.form-minimized #layout {
+  padding-top: 2rem;
+  z-index: 1;
+  position: relative;
+}
+
+body.form-minimized #layout2 {
+  padding-top: 2rem;
+  margin-top: calc(-1 * var(--connect-form-height, 0px) - 3rem);
+  position: relative;
+  z-index: 1;
+}
+
+body.form-minimized #layout3 {
+  padding-top: 2rem;
+  margin-top: calc(-1 * var(--connect-form-height, 0px) - 3rem);
+  position: relative;
+  z-index: 1;
 }
 
 @media (max-width: 1100px) {
@@ -182,6 +207,11 @@ body {
     position: static;
     width: 100%;
   }
+  
+  /* On mobile, only layout2 should move up when minimized, not layout3 */
+  body.form-minimized #layout3 {
+    margin-top: 0;
+  }
 }
 
 /* Panel Styling */
@@ -194,6 +224,133 @@ body {
   position: relative;
   overflow: hidden;
   animation: borderFade 3s ease-in-out infinite;
+  transition: all 0.3s ease;
+}
+
+/* Add extra right padding to connect-form to prevent overlap with collapse button */
+#connect-form {
+  padding-right: 3rem;
+}
+
+/* Collapse/Expand Arrow Buttons */
+.collapse-btn,
+.expand-btn {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -5px;
+  width: 30px;
+  height: 100%;
+  background: linear-gradient(135deg, var(--color-bg-tertiary) 0%, var(--color-bg-secondary) 100%);
+  border: 1px solid var(--color-border-primary);
+  border-left: none;
+  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
+  color: var(--color-text-primary);
+  font-size: 1.8rem;
+  font-weight: bold;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 4px 0 8px rgba(0, 0, 0, 0.3);
+  transition: all 0.3s ease;
+}
+
+.collapse-btn:hover,
+.expand-btn:hover {
+  right: 0px;
+  box-shadow: 4px 0 12px rgba(0, 0, 0, 0.5);
+}
+
+/* Connection state colors for arrows */
+.collapse-btn.connected,
+.expand-btn.connected {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  border-color: #059669;
+}
+
+.collapse-btn.connected:hover,
+.expand-btn.connected:hover {
+  background: linear-gradient(135deg, #34d399 0%, #10b981 100%);
+  box-shadow: 4px 0 12px rgba(16, 185, 129, 0.5);
+}
+
+.collapse-btn.disconnected,
+.expand-btn.disconnected {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  border-color: #dc2626;
+}
+
+.collapse-btn.disconnected:hover,
+.expand-btn.disconnected:hover {
+  background: linear-gradient(135deg, #f87171 0%, #ef4444 100%);
+  box-shadow: 4px 0 12px rgba(239, 68, 68, 0.5);
+}
+
+.collapse-btn {
+  display: flex;
+}
+
+.expand-btn {
+  display: none;
+}
+
+/* Minimized State - Slide Left */
+#connect-form.minimized {
+  transform: translateX(calc(-100% + 10px));
+  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 1;
+}
+
+#connect-form.minimized .collapse-btn {
+  display: none;
+}
+
+#connect-form.minimized .expand-btn {
+  display: flex;
+  right: 0px;
+  z-index: 1;
+}
+
+#connect-form:not(.minimized) {
+  transform: translateX(0);
+  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Floating Expander overlay to keep expandBtn clickable above layouts */
+#connect-expander {
+  position: absolute;
+  top: 2rem; /* align with layout padding */
+  left: 0rem;
+  width: 30px;
+  height: var(--connect-form-height, 120px);
+  display: none;
+  z-index: 10000; /* above layouts */
+  pointer-events: none; /* allow clicks through except on the button itself */
+}
+
+#connect-expander .expand-btn {
+  display: flex !important;
+  position: static; /* ignore absolute positioning rules from in-form styling */
+  width: 30px;
+  height: 100%;
+  right: auto;
+  pointer-events: auto; /* clickable */
+  box-shadow: 4px 0 12px rgba(0, 0, 0, 0.5);
+}
+
+/* Remove gradient shine pseudo-element for expand button */
+#connect-expander .expand-btn::before,
+.expand-btn::before {
+  content: none !important;
+  display: none !important;
+}
+
+/* Show overlay only when form is minimized */
+body.form-minimized #connect-expander {
+  display: block;
 }
 
 @keyframes borderFade {
@@ -230,8 +387,9 @@ form {
   display: flex;
   flex-direction: column;
   min-width: 200px;
-  flex: 1;
+  flex: 0 0 auto;
   padding-right: 10px;
+  margin-bottom: 1rem;
 }
 
 .field-inline {
