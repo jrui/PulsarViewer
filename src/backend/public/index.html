@@ -86,6 +86,14 @@
       </div>
       <div class="actions">
         <button type="submit" id="sendBtn">Send</button>
+        <button type="button" id="importCsvBtn" style="padding: 0.5rem 1rem; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem;">Import CSV</button>
+        <input type="file" id="importCsvFile" accept=".csv" style="display: none;" />
+      </div>
+      <div id="importProgress" style="display: none; margin-top: 1rem; padding: 0.75rem; background: var(--color-bg-primary); border: 1px solid var(--color-border-secondary); border-radius: 6px;">
+        <div id="importProgressText" style="font-size: 0.9rem; margin-bottom: 0.5rem;">Sending: 0 / 0</div>
+        <div style="height: 8px; background: var(--color-bg-secondary); border-radius: 4px; overflow: hidden;">
+          <div id="importProgressBar" style="height: 100%; width: 0%; background: linear-gradient(90deg, #10b981, #059669); border-radius: 4px; transition: width 0.15s ease-out;"></div>
+        </div>
       </div>
     </form>
   </aside>
@@ -97,6 +105,7 @@
           <label>Filter</label>
           <input id="filter" placeholder="filter (show only messages containing this)" />
           <label class="checkbox"><input type="checkbox" id="useRegex" /> Use Regex</label>
+          <button type="button" id="exportCsvBtn" style="padding: 0.4rem 0.8rem; margin-left: 0.5rem; background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.85rem;">Export CSV</button>
           <button type="button" id="clearBtn" style="padding: 0.4rem 0.8rem; margin-left: 0.5rem; background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.85rem;">Clear</button>
         </div>
       <div id="messages"></div>

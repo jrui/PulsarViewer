@@ -97,6 +97,7 @@
   const collapseBtn = document.getElementById('collapseBtn');
   const expandBtn = document.getElementById('expandBtn');
   const clearBtn = document.getElementById('clearBtn');
+  const exportCsvBtn = document.getElementById('exportCsvBtn');
   // Create floating expander overlay to keep expand button clickable above layouts
   let expanderContainer = null;
   if (expandBtn) {
@@ -605,6 +606,26 @@
     });
   }
 
+  // Export CSV button – download CSV from backend
+  if (exportCsvBtn) {
+    exportCsvBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      try {
+        const response = await fetch('/api/export');
+        if (!response.ok) throw new Error('Failed to export');
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'messages.csv';
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        addMessage('error', `Failed to download CSV: ${err.message}`, true);
+      }
+    });
+  }
+
   // Clear messages button
   if (clearBtn) {
     clearBtn.addEventListener('click', async (e) => {
@@ -825,6 +846,107 @@
     }
     sendBtn.disabled = false;
   });
+
+  // Import CSV: send all rows to connected topic with progress
+  const importCsvBtn = document.getElementById('importCsvBtn');
+  const importCsvFile = document.getElementById('importCsvFile');
+  const importProgress = document.getElementById('importProgress');
+  const importProgressText = document.getElementById('importProgressText');
+  const importProgressBar = document.getElementById('importProgressBar');
+  if (importCsvBtn && importCsvFile && importProgress && importProgressText && importProgressBar) {
+    importCsvBtn.addEventListener('click', () => importCsvFile.click());
+    importCsvFile.addEventListener('change', async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      e.target.value = '';
+      const serviceUrl = serviceUrlEl.value.trim();
+      const topic = topicEl.value.trim();
+      const token = tokenEl.value.trim();
+      if (!serviceUrl || !topic) {
+        addMessage('error', 'Connect first: set Service URL and Topic', true);
+        return;
+      }
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('serviceUrl', serviceUrl);
+      formData.append('topic', topic);
+      if (token) formData.append('token', token);
+      importCsvBtn.disabled = true;
+      importProgress.style.display = 'block';
+      importProgressText.textContent = 'Sending: 0 / …';
+      importProgressBar.style.width = '0%';
+
+      try {
+        const resp = await fetch('/api/import', { method: 'POST', body: formData });
+        if (!resp.ok || !resp.body) {
+          const errText = await resp.text();
+          throw new Error(errText || 'Import failed');
+        }
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                if (data.error) {
+                  addMessage('error', `Import failed: ${data.error} (${data.sent} sent)`, true);
+                  importProgress.style.display = 'none';
+                  break;
+                }
+                if (data.total !== undefined) {
+                  importProgressText.textContent = `Sending: ${data.sent} / ${data.total}`;
+                  importProgressBar.style.width = data.total > 0 ? `${(100 * data.sent) / data.total}%` : '0%';
+                }
+                if (data.done) {
+                  importProgressText.textContent = `Done: ${data.sent} messages sent`;
+                  importProgressBar.style.width = '100%';
+                  addMessage('info', `Imported ${data.sent} messages to topic`, true);
+                  setTimeout(() => {
+                    importProgress.style.display = 'none';
+                  }, 2500);
+                }
+              } catch (_) {}
+            }
+          }
+        }
+        // Process any remaining buffer (e.g. final "done" event)
+        if (buffer) {
+          buffer.split('\n').forEach(line => {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                if (data.error) {
+                  addMessage('error', `Import failed: ${data.error} (${data.sent} sent)`, true);
+                  importProgress.style.display = 'none';
+                }
+                if (data.total !== undefined) {
+                  importProgressText.textContent = `Sending: ${data.sent} / ${data.total}`;
+                  importProgressBar.style.width = data.total > 0 ? `${(100 * data.sent) / data.total}%` : '0%';
+                }
+                if (data.done) {
+                  importProgressText.textContent = `Done: ${data.sent} messages sent`;
+                  importProgressBar.style.width = '100%';
+                  addMessage('info', `Imported ${data.sent} messages to topic`, true);
+                  setTimeout(() => { importProgress.style.display = 'none'; }, 2500);
+                }
+              } catch (_) {}
+            }
+          });
+        }
+      } catch (err) {
+        addMessage('error', `Import failed: ${err.message}`, true);
+        importProgress.style.display = 'none';
+      }
+      importCsvBtn.disabled = false;
+    });
+  }
 
   // Pagination controls
   if (document.getElementById('page-prev')) {
