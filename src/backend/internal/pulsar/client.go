@@ -87,6 +87,7 @@ func (cm *ClientManager) StreamMessages(ctx context.Context, config ConsumerConf
 		SubscriptionName:            config.Subscription,
 		Type:                        parseSubscriptionType(config.SubscriptionType),
 		SubscriptionInitialPosition: parseInitialPosition(config.InitialPosition),
+		SubscriptionMode:            pulsar.NonDurable,
 	})
 
 	if err != nil {

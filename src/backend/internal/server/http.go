@@ -2,10 +2,12 @@ package server
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -107,9 +109,22 @@ func NewHTTPHandler(pulsarClient *pulsar.ClientManager, messageStore *store.Mess
 	mux.HandleFunc("/api/stats", handler.handleGetStats)
 	mux.HandleFunc("/api/send", handler.handleSendMessage)
 	mux.HandleFunc("/api/clear", handler.handleClearMessages)
+	mux.HandleFunc("/api/export", handler.handleExportCSV)
+	mux.HandleFunc("/api/import", handler.handleImportCSV)
 
 	// WebSocket endpoint for streaming
 	mux.HandleFunc("/api/stream", handler.handleStream)
+
+	// Disconnect active stream
+	mux.HandleFunc("/api/disconnect", handler.handleDisconnect)
+
+	// Admin API proxy endpoints
+	mux.HandleFunc("/api/admin/topics", handler.handleAdminTopics)
+	mux.HandleFunc("/api/admin/topic-stats", handler.handleAdminTopicStats)
+	mux.HandleFunc("/api/admin/topic-internal-stats", handler.handleAdminTopicInternalStats)
+	mux.HandleFunc("/api/admin/subscriptions", handler.handleAdminSubscriptions)
+	mux.HandleFunc("/api/admin/namespaces", handler.handleAdminNamespaces)
+	mux.HandleFunc("/api/admin/check-permissions", handler.handleAdminCheckPermissions)
 
 	// Health check
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -295,6 +310,165 @@ func (h *HTTPHandler) handleClearMessages(w http.ResponseWriter, r *http.Request
 		"ok":      true,
 		"message": "Messages cleared",
 	})
+}
+
+func (h *HTTPHandler) handleExportCSV(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	messages := h.messageStore.GetAll()
+
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition", `attachment; filename="messages.csv"`)
+
+	cw := csv.NewWriter(w)
+	if err := cw.Write([]string{"msg_timestamp", "data"}); err != nil {
+		http.Error(w, "Failed to write CSV header", http.StatusInternalServerError)
+		return
+	}
+
+	// PublishTime is Unix milliseconds in Pulsar
+	for _, msg := range messages {
+		ts := time.Unix(0, msg.PublishTime*int64(time.Millisecond)).UTC().Format(time.RFC3339Nano)
+		data := msg.Payload
+		if err := cw.Write([]string{ts, data}); err != nil {
+			http.Error(w, "Failed to write CSV row", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	cw.Flush()
+	if cw.Error() != nil {
+		http.Error(w, "Failed to flush CSV", http.StatusInternalServerError)
+		return
+	}
+}
+
+func (h *HTTPHandler) handleImportCSV(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	const maxFormMem = 32 << 20 // 32 MB
+	if err := r.ParseMultipartForm(maxFormMem); err != nil {
+		http.Error(w, "Failed to parse form: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "Missing or invalid file: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	serviceURL := strings.TrimSpace(r.FormValue("serviceUrl"))
+	topic := strings.TrimSpace(r.FormValue("topic"))
+	token := strings.TrimSpace(r.FormValue("token"))
+
+	if serviceURL == "" || topic == "" {
+		http.Error(w, "Missing serviceUrl or topic", http.StatusBadRequest)
+		return
+	}
+
+	cr := csv.NewReader(file)
+	records, err := cr.ReadAll()
+	if err != nil {
+		http.Error(w, "Invalid CSV: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Count rows to send (skip header, skip rows with < 2 columns)
+	total := 0
+	for i, row := range records {
+		if i == 0 {
+			continue
+		}
+		if len(row) >= 2 {
+			total++
+		}
+	}
+
+	client, err := h.pulsarClient.GetOrCreateClient(serviceURL, token)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	producer, err := client.CreateProducer(pulsarclient.ProducerOptions{
+		Topic:                   topic,
+		SendTimeout:             60 * time.Second,
+		DisableBatching:         false,
+		BatchingMaxPublishDelay: 1 * time.Millisecond,
+		BatchingMaxMessages:    2000,
+		MaxPendingMessages:      10000,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer producer.Close()
+
+	// Stream progress as SSE
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	writeSSE := func(obj map[string]interface{}) {
+		data, _ := json.Marshal(obj)
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		flusher.Flush()
+	}
+
+	ctx := context.Background()
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	sent := 0
+	var firstErr error
+	const progressInterval = 100 // emit progress every N messages
+
+	for i, row := range records {
+		if i == 0 {
+			continue
+		}
+		if len(row) < 2 {
+			continue
+		}
+		payload := row[1]
+		msg := &pulsarclient.ProducerMessage{Payload: []byte(payload)}
+		wg.Add(1)
+		producer.SendAsync(ctx, msg, func(_ pulsarclient.MessageID, _ *pulsarclient.ProducerMessage, err error) {
+			defer wg.Done()
+			mu.Lock()
+			if err != nil && firstErr == nil {
+				firstErr = err
+			}
+			sent++
+			cur := sent
+			mu.Unlock()
+			if cur%progressInterval == 0 || cur == total {
+				mu.Lock()
+				writeSSE(map[string]interface{}{"sent": sent, "total": total})
+				mu.Unlock()
+			}
+		})
+	}
+
+	wg.Wait()
+	if firstErr != nil {
+		writeSSE(map[string]interface{}{"error": firstErr.Error(), "sent": sent})
+		return
+	}
+	writeSSE(map[string]interface{}{"done": true, "sent": sent})
 }
 
 type StreamRequest struct {
@@ -681,6 +855,391 @@ func toStoreMessage(msg *pulsar.Message) *store.Message {
 		Payload:     msg.Payload,
 		JSON:        msg.JSON,
 	}
+}
+
+func (h *HTTPHandler) handleDisconnect(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	h.streamManager.Close()
+	h.messageStore.Clear()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+}
+
+// adminHTTPBase derives candidate Pulsar HTTP admin base URLs from a broker service URL.
+// Returns a slice of URLs to try in order (port-specific first, then port-less fallback).
+//
+//	pulsar://host:6650  → [http://host:8080, http://host]
+//	pulsar+ssl://host   → [https://host:8443, https://host]
+//	http://host:8080    → [http://host:8080]   (used as-is, no fallback needed)
+func adminHTTPBases(serviceURL string) ([]string, error) {
+	u, err := url.Parse(serviceURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid serviceUrl: %w", err)
+	}
+	switch u.Scheme {
+	case "pulsar":
+		host := u.Hostname()
+		return []string{
+			fmt.Sprintf("http://%s:8080", host),
+			fmt.Sprintf("http://%s", host),
+		}, nil
+	case "pulsar+ssl":
+		host := u.Hostname()
+		return []string{
+			fmt.Sprintf("https://%s:8443", host),
+			fmt.Sprintf("https://%s", host),
+		}, nil
+	case "http", "https":
+		base := fmt.Sprintf("%s://%s", u.Scheme, u.Host)
+		// If the URL already has an explicit port, also offer the port-less fallback
+		if u.Port() != "" {
+			return []string{base, fmt.Sprintf("%s://%s", u.Scheme, u.Hostname())}, nil
+		}
+		return []string{base}, nil
+	default:
+		host := u.Hostname()
+		if host == "" {
+			host = u.Host
+		}
+		return []string{
+			fmt.Sprintf("http://%s:8080", host),
+			fmt.Sprintf("http://%s", host),
+		}, nil
+	}
+}
+
+// adminRequest tries each base URL in order and returns the first successful response.
+// A response is considered "successful" for routing purposes even if the HTTP status
+// is 4xx (auth errors etc.) — we only retry on connection/network errors.
+func adminRequest(bases []string, token, path string) ([]byte, int, error) {
+	httpClient := &http.Client{Timeout: 10 * time.Second}
+	var lastErr error
+	for _, base := range bases {
+		req, err := http.NewRequest(http.MethodGet, base+path, nil)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			lastErr = err
+			continue // try next base
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return body, resp.StatusCode, err
+	}
+	return nil, 0, fmt.Errorf("admin API unreachable (tried %v): %w", bases, lastErr)
+}
+
+func (h *HTTPHandler) handleAdminTopics(w http.ResponseWriter, r *http.Request) {
+	serviceURL := r.URL.Query().Get("serviceUrl")
+	namespace := r.URL.Query().Get("namespace")
+	token := r.URL.Query().Get("token")
+
+	if serviceURL == "" || namespace == "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "serviceUrl and namespace are required"})
+		return
+	}
+
+	bases, err := adminHTTPBases(serviceURL)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
+		return
+	}
+
+	// Try persistent topics
+	persistent, pStatus, pErr := adminRequest(bases, token, "/admin/v2/persistent/"+namespace)
+	// Try non-persistent topics
+	nonPersistent, npStatus, npErr := adminRequest(bases, token, "/admin/v2/non-persistent/"+namespace)
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if pErr != nil && npErr != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Admin API unreachable: " + pErr.Error()})
+		return
+	}
+
+	var allTopics []string
+	if pErr == nil && pStatus == http.StatusOK {
+		var topics []string
+		if err := json.Unmarshal(persistent, &topics); err == nil {
+			allTopics = append(allTopics, topics...)
+		}
+	}
+	if npErr == nil && npStatus == http.StatusOK {
+		var topics []string
+		if err := json.Unmarshal(nonPersistent, &topics); err == nil {
+			allTopics = append(allTopics, topics...)
+		}
+	}
+
+	if allTopics == nil {
+		allTopics = []string{}
+	}
+
+	isAuthErr := func(s int) bool { return s == http.StatusUnauthorized || s == http.StatusForbidden }
+
+	// Only surface an auth warning if no topics were returned AND at least one
+	// request was rejected for auth reasons. A 403 on non-persistent topics when
+	// persistent ones succeed is normal on many clusters (not an auth problem).
+	authFailed := len(allTopics) == 0 && (isAuthErr(pStatus) || isAuthErr(npStatus))
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"topics":     allTopics,
+		"authFailed": authFailed,
+	})
+}
+
+func (h *HTTPHandler) handleAdminTopicStats(w http.ResponseWriter, r *http.Request) {
+	serviceURL := r.URL.Query().Get("serviceUrl")
+	topic := r.URL.Query().Get("topic")
+	token := r.URL.Query().Get("token")
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if serviceURL == "" || topic == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "serviceUrl and topic are required"})
+		return
+	}
+
+	bases, err := adminHTTPBases(serviceURL)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
+		return
+	}
+
+	topicPath := topicToAdminPath(topic, "stats")
+	body, status, err := adminRequest(bases, token, topicPath)
+
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Admin API unreachable: " + err.Error()})
+		return
+	}
+	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+		w.WriteHeader(status)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Unauthorized: token lacks read permissions", "authFailed": true})
+		return
+	}
+	w.WriteHeader(status)
+	w.Write(body)
+}
+
+func (h *HTTPHandler) handleAdminTopicInternalStats(w http.ResponseWriter, r *http.Request) {
+	serviceURL := r.URL.Query().Get("serviceUrl")
+	topic := r.URL.Query().Get("topic")
+	token := r.URL.Query().Get("token")
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if serviceURL == "" || topic == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "serviceUrl and topic are required"})
+		return
+	}
+
+	bases, err := adminHTTPBases(serviceURL)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
+		return
+	}
+
+	topicPath := topicToAdminPath(topic, "internalStats")
+	body, status, err := adminRequest(bases, token, topicPath)
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Admin API unreachable: " + err.Error()})
+		return
+	}
+	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+		w.WriteHeader(status)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Unauthorized: token lacks read permissions", "authFailed": true})
+		return
+	}
+	w.WriteHeader(status)
+	w.Write(body)
+}
+
+func (h *HTTPHandler) handleAdminSubscriptions(w http.ResponseWriter, r *http.Request) {
+	serviceURL := r.URL.Query().Get("serviceUrl")
+	topic := r.URL.Query().Get("topic")
+	token := r.URL.Query().Get("token")
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if serviceURL == "" || topic == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "serviceUrl and topic are required"})
+		return
+	}
+
+	bases, err := adminHTTPBases(serviceURL)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
+		return
+	}
+
+	topicPath := topicToAdminPath(topic, "subscriptions")
+	body, status, err := adminRequest(bases, token, topicPath)
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Admin API unreachable: " + err.Error()})
+		return
+	}
+	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+		w.WriteHeader(status)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Unauthorized", "authFailed": true})
+		return
+	}
+	w.WriteHeader(status)
+	w.Write(body)
+}
+
+func (h *HTTPHandler) handleAdminNamespaces(w http.ResponseWriter, r *http.Request) {
+	serviceURL := r.URL.Query().Get("serviceUrl")
+	tenant := r.URL.Query().Get("tenant")
+	token := r.URL.Query().Get("token")
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if serviceURL == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "serviceUrl is required"})
+		return
+	}
+	if tenant == "" {
+		tenant = "public"
+	}
+
+	bases, err := adminHTTPBases(serviceURL)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
+		return
+	}
+
+	body, status, err := adminRequest(bases, token, "/admin/v2/namespaces/"+tenant)
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Admin API unreachable: " + err.Error()})
+		return
+	}
+	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+		w.WriteHeader(status)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Unauthorized", "authFailed": true})
+		return
+	}
+	w.WriteHeader(status)
+	w.Write(body)
+}
+
+func (h *HTTPHandler) handleAdminCheckPermissions(w http.ResponseWriter, r *http.Request) {
+	serviceURL := r.URL.Query().Get("serviceUrl")
+	namespace := r.URL.Query().Get("namespace")
+	token := r.URL.Query().Get("token")
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if serviceURL == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "serviceUrl is required"})
+		return
+	}
+	if namespace == "" {
+		namespace = "public/default"
+	}
+
+	bases, err := adminHTTPBases(serviceURL)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
+		return
+	}
+
+	type checkResult struct {
+		Endpoint string `json:"endpoint"`
+		URL      string `json:"url"`
+		Status   int    `json:"status"`
+		OK       bool   `json:"ok"`
+		Error    string `json:"error,omitempty"`
+	}
+
+	// Determine which base URL actually responds
+	resolvedBase := bases[0]
+	for _, b := range bases {
+		_, s, e := adminRequest([]string{b}, token, "/admin/v2/clusters")
+		if e == nil && s != 0 {
+			resolvedBase = b
+			break
+		}
+	}
+
+	probes := []struct {
+		label string
+		path  string
+	}{
+		{"List clusters", "/admin/v2/clusters"},
+		{"List tenants", "/admin/v2/tenants"},
+		{"List namespaces (public)", "/admin/v2/namespaces/public"},
+		{"List persistent topics (" + namespace + ")", "/admin/v2/persistent/" + namespace},
+		{"List non-persistent topics (" + namespace + ")", "/admin/v2/non-persistent/" + namespace},
+	}
+
+	results := make([]checkResult, 0, len(probes))
+	for _, p := range probes {
+		fullURL := resolvedBase + p.path
+		body, status, reqErr := adminRequest([]string{resolvedBase}, token, p.path)
+		res := checkResult{
+			Endpoint: p.label,
+			URL:      fullURL,
+			Status:   status,
+			OK:       status == http.StatusOK,
+		}
+		if reqErr != nil {
+			res.Error = reqErr.Error()
+		} else if status != http.StatusOK {
+			// Include a snippet of the response body so the caller can see the reason
+			snippet := strings.TrimSpace(string(body))
+			if len(snippet) > 200 {
+				snippet = snippet[:200] + "…"
+			}
+			res.Error = snippet
+		}
+		results = append(results, res)
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"resolvedAdminBase": resolvedBase,
+		"checks":            results,
+	})
+}
+
+// topicToAdminPath converts a topic URL to an admin API path with the given suffix.
+// e.g. persistent://tenant/ns/topic, "stats" → /admin/v2/persistent/tenant/ns/topic/stats
+func topicToAdminPath(topic, suffix string) string {
+	scheme := "persistent"
+	if strings.HasPrefix(topic, "non-persistent://") {
+		scheme = "non-persistent"
+	}
+	topic = strings.TrimPrefix(topic, "persistent://")
+	topic = strings.TrimPrefix(topic, "non-persistent://")
+	return fmt.Sprintf("/admin/v2/%s/%s/%s", scheme, topic, suffix)
 }
 
 // writeSSEEvent writes a Server-Sent Event to the response writer
