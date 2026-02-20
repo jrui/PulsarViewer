@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -107,6 +108,8 @@ func NewHTTPHandler(pulsarClient *pulsar.ClientManager, messageStore *store.Mess
 	mux.HandleFunc("/api/stats", handler.handleGetStats)
 	mux.HandleFunc("/api/send", handler.handleSendMessage)
 	mux.HandleFunc("/api/clear", handler.handleClearMessages)
+	mux.HandleFunc("/api/export", handler.handleExportCSV)
+	mux.HandleFunc("/api/import", handler.handleImportCSV)
 
 	// WebSocket endpoint for streaming
 	mux.HandleFunc("/api/stream", handler.handleStream)
@@ -295,6 +298,165 @@ func (h *HTTPHandler) handleClearMessages(w http.ResponseWriter, r *http.Request
 		"ok":      true,
 		"message": "Messages cleared",
 	})
+}
+
+func (h *HTTPHandler) handleExportCSV(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	messages := h.messageStore.GetAll()
+
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition", `attachment; filename="messages.csv"`)
+
+	cw := csv.NewWriter(w)
+	if err := cw.Write([]string{"msg_timestamp", "data"}); err != nil {
+		http.Error(w, "Failed to write CSV header", http.StatusInternalServerError)
+		return
+	}
+
+	// PublishTime is Unix milliseconds in Pulsar
+	for _, msg := range messages {
+		ts := time.Unix(0, msg.PublishTime*int64(time.Millisecond)).UTC().Format(time.RFC3339Nano)
+		data := msg.Payload
+		if err := cw.Write([]string{ts, data}); err != nil {
+			http.Error(w, "Failed to write CSV row", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	cw.Flush()
+	if cw.Error() != nil {
+		http.Error(w, "Failed to flush CSV", http.StatusInternalServerError)
+		return
+	}
+}
+
+func (h *HTTPHandler) handleImportCSV(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	const maxFormMem = 32 << 20 // 32 MB
+	if err := r.ParseMultipartForm(maxFormMem); err != nil {
+		http.Error(w, "Failed to parse form: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "Missing or invalid file: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	serviceURL := strings.TrimSpace(r.FormValue("serviceUrl"))
+	topic := strings.TrimSpace(r.FormValue("topic"))
+	token := strings.TrimSpace(r.FormValue("token"))
+
+	if serviceURL == "" || topic == "" {
+		http.Error(w, "Missing serviceUrl or topic", http.StatusBadRequest)
+		return
+	}
+
+	cr := csv.NewReader(file)
+	records, err := cr.ReadAll()
+	if err != nil {
+		http.Error(w, "Invalid CSV: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Count rows to send (skip header, skip rows with < 2 columns)
+	total := 0
+	for i, row := range records {
+		if i == 0 {
+			continue
+		}
+		if len(row) >= 2 {
+			total++
+		}
+	}
+
+	client, err := h.pulsarClient.GetOrCreateClient(serviceURL, token)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	producer, err := client.CreateProducer(pulsarclient.ProducerOptions{
+		Topic:                   topic,
+		SendTimeout:             60 * time.Second,
+		DisableBatching:         false,
+		BatchingMaxPublishDelay: 1 * time.Millisecond,
+		BatchingMaxMessages:    2000,
+		MaxPendingMessages:      10000,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer producer.Close()
+
+	// Stream progress as SSE
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	writeSSE := func(obj map[string]interface{}) {
+		data, _ := json.Marshal(obj)
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		flusher.Flush()
+	}
+
+	ctx := context.Background()
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	sent := 0
+	var firstErr error
+	const progressInterval = 100 // emit progress every N messages
+
+	for i, row := range records {
+		if i == 0 {
+			continue
+		}
+		if len(row) < 2 {
+			continue
+		}
+		payload := row[1]
+		msg := &pulsarclient.ProducerMessage{Payload: []byte(payload)}
+		wg.Add(1)
+		producer.SendAsync(ctx, msg, func(_ pulsarclient.MessageID, _ *pulsarclient.ProducerMessage, err error) {
+			defer wg.Done()
+			mu.Lock()
+			if err != nil && firstErr == nil {
+				firstErr = err
+			}
+			sent++
+			cur := sent
+			mu.Unlock()
+			if cur%progressInterval == 0 || cur == total {
+				mu.Lock()
+				writeSSE(map[string]interface{}{"sent": sent, "total": total})
+				mu.Unlock()
+			}
+		})
+	}
+
+	wg.Wait()
+	if firstErr != nil {
+		writeSSE(map[string]interface{}{"error": firstErr.Error(), "sent": sent})
+		return
+	}
+	writeSSE(map[string]interface{}{"done": true, "sent": sent})
 }
 
 type StreamRequest struct {
