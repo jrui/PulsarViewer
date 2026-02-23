@@ -1,4 +1,7 @@
 (() => {
+  // In Tauri desktop app, frontend is served by the app; API runs on localhost:3000
+  const API_BASE = (typeof window !== 'undefined' && window.__TAURI__) ? 'http://localhost:3000' : '';
+
   // ─── Storage ────────────────────────────────────────────────────────────────
   const storage = {
     isElectron: !!(window.electron && window.electron.saveConnection),
@@ -240,7 +243,7 @@
     const params = new URLSearchParams({ serviceUrl, topic, subscription, subscriptionType, initialPosition });
     if (token) params.append('token', token);
 
-    fetch(`/api/stream?${params}`)
+    fetch(`${API_BASE}/api/stream?${params}`)
       .then(response => {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         setConnected(true);
@@ -347,7 +350,7 @@
     if (evtSource) { evtSource.close(); evtSource = null; }
     connectionId = null;
     initialPageLoaded = false;
-    try { await fetch('/api/disconnect', { method: 'POST' }); } catch {}
+    try { await fetch(`${API_BASE}/api/disconnect`, { method: 'POST' }); } catch {}
     totalBackendMessages = 0;
     previousBackendCount = 0;
     currentPage = 0;
@@ -410,7 +413,7 @@
   async function fetchAndRenderPage(page = 0) {
     isSearchActive = false;
     try {
-      const res = await fetch(`/api/messages?page=${page}&pageSize=${MESSAGES_PER_PAGE}`);
+      const res = await fetch(`${API_BASE}/api/messages?page=${page}&pageSize=${MESSAGES_PER_PAGE}`);
       if (!res.ok) throw new Error('Failed to fetch messages');
       const data = await res.json();
       currentPage = data.page;
@@ -428,7 +431,7 @@
     try {
       const params = new URLSearchParams({ q: query, pageSize: MESSAGES_PER_PAGE, page });
       if (isRegex) params.append('regex', 'true');
-      const res = await fetch(`/api/search?${params}`);
+      const res = await fetch(`${API_BASE}/api/search?${params}`);
       if (!res.ok) throw new Error('Search failed');
       const data = await res.json();
       currentPage = page;
@@ -508,7 +511,7 @@
   // ─── Export CSV ───────────────────────────────────────────────────────────
   exportCsvBtn.addEventListener('click', async () => {
     try {
-      const res = await fetch('/api/export');
+      const res = await fetch(`${API_BASE}/api/export`);
       if (!res.ok) throw new Error('Export failed');
       const blob = await res.blob();
       const a = document.createElement('a');
@@ -524,7 +527,7 @@
   // ─── Clear messages ───────────────────────────────────────────────────────
   clearBtn.addEventListener('click', async () => {
     try {
-      await fetch('/api/clear', { method: 'POST' });
+      await fetch(`${API_BASE}/api/clear`, { method: 'POST' });
       messagesEl.innerHTML = '';
       totalBackendMessages = 0;
       previousBackendCount = 0;
@@ -558,7 +561,7 @@
     }
 
     try {
-      const res = await fetch('/api/send', {
+      const res = await fetch(`${API_BASE}/api/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ serviceUrl, topic, payload, key, properties, token }),
@@ -614,7 +617,7 @@
     progressBar.style.width = '0%';
 
     try {
-      const res = await fetch('/api/import', { method: 'POST', body: formData });
+      const res = await fetch(`${API_BASE}/api/import`, { method: 'POST', body: formData });
       if (!res.ok || !res.body) throw new Error(await res.text() || 'Import failed');
       const reader = res.body.getReader();
       const dec = new TextDecoder();
@@ -675,7 +678,7 @@
     try {
       const params = new URLSearchParams({ serviceUrl, namespace });
       if (token) params.append('token', token);
-      const res = await fetch(`/api/admin/topics?${params}`);
+      const res = await fetch(`${API_BASE}/api/admin/topics?${params}`);
       const data = await res.json();
 
       if (!res.ok) {
@@ -731,7 +734,7 @@
     try {
       const params = new URLSearchParams({ serviceUrl, namespace });
       if (token) params.append('token', token);
-      const res = await fetch(`/api/admin/check-permissions?${params}`);
+      const res = await fetch(`${API_BASE}/api/admin/check-permissions?${params}`);
       const data = await res.json();
 
       if (!res.ok) {
@@ -779,7 +782,7 @@
     if (token) params.append('token', token);
 
     try {
-      const res = await fetch(`/api/admin/topic-stats?${params}`);
+      const res = await fetch(`${API_BASE}/api/admin/topic-stats?${params}`);
       const data = await res.json();
       if (!res.ok) {
         if (data.authFailed || res.status === 401 || res.status === 403) {
