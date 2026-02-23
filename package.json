@@ -1,6 +1,6 @@
 {
   "name": "pulsarviewer",
-  "version": "3.0.10",
+  "version": "3.0.11",
   "description": "A lightweight Pulsar message viewer with Go backend",
   "homepage": "https://github.com/jrui/PulsarViewer",
   "author": {
