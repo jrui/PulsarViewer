@@ -25,7 +25,7 @@ jobs:
             target: universal-apple-darwin
             artifact_name: PulsarViewer_universal.dmg
             artifact_path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             artifact_name: pulsarviewer_amd64.AppImage
             artifact_path: src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
@@ -57,7 +57,7 @@ jobs:
           rustup target add x86_64-apple-darwin
 
       - name: Install Rust target (Linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-22.04'
         run: rustup target add x86_64-unknown-linux-gnu
 
       - name: Install Rust target (Windows)
@@ -70,12 +70,12 @@ jobs:
           go-version: '1.22'
 
       - name: Install dependencies (Ubuntu)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-22.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             build-essential curl wget file \
-            libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.0-dev libssl-dev libgtk-3-dev \
+            libwebkit2gtk-4.0-dev libjavascriptcoregtk-4.0-dev libssl-dev libgtk-3-dev \
             libayatana-appindicator3-dev librsvg2-dev \
             libsoup-3.0-dev libsoup2.4-dev
 
@@ -85,12 +85,13 @@ jobs:
           cd src/backend
           GOOS=darwin GOARCH=amd64 go build -o pulsarviewer-backend-x86_64-apple-darwin ./cmd/main.go
           GOOS=darwin GOARCH=arm64 go build -o pulsarviewer-backend-aarch64-apple-darwin ./cmd/main.go
+          chmod +x pulsarviewer-backend-x86_64-apple-darwin pulsarviewer-backend-aarch64-apple-darwin
+          # Tauri's universal build expects both per-arch sidecar binaries; lipo universal is optional
           lipo -create pulsarviewer-backend-x86_64-apple-darwin pulsarviewer-backend-aarch64-apple-darwin -output pulsarviewer-backend-universal-apple-darwin
-          rm pulsarviewer-backend-x86_64-apple-darwin pulsarviewer-backend-aarch64-apple-darwin
           chmod +x pulsarviewer-backend-universal-apple-darwin
 
       - name: Build Go backend (Linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-22.04'
         run: |
           cd src/backend
           GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o pulsarviewer-backend-x86_64-unknown-linux-gnu ./cmd/main.go
