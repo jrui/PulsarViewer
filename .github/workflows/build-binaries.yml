@@ -99,7 +99,7 @@ jobs:
         run: npm install
 
       - name: Generate Tauri icons
-        run: npx @tauri-apps/cli icon public/pulsar_viewer_logo.png
+        run: npx @tauri-apps/cli icon src/backend/public/pulsar_viewer_logo.png
 
       - name: Build Tauri app
         run: npm run tauri:build -- --target ${{ matrix.target }}
@@ -110,6 +110,7 @@ jobs:
         with:
           tag_name: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
           files: ${{ matrix.artifact_path }}
+          fail_on_unmatched_files: true
           draft: false
           prerelease: false
         env:
