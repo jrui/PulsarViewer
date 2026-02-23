@@ -2106,7 +2106,7 @@ dependencies = [
 
 [[package]]
 name = "pulsarviewer"
-version = "3.0.6"
+version = "3.0.7"
 dependencies = [
  "serde",
  "serde_json",

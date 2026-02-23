@@ -2,7 +2,7 @@
   "build": {
     "beforeDevCommand": "bash -c 'cd src/backend && go run ./cmd/main.go'",
     "devPath": "http://localhost:3000",
-    "distDir": "../public"
+    "distDir": "../src/backend/public"
   },
   "package": {
     "productName": "PulsarViewer",
@@ -17,7 +17,7 @@
         "sidecar": true,
         "scope": [
           {
-            "name": "pulsarviewer-backend",
+            "name": "../src/backend/pulsarviewer-backend",
             "sidecar": true
           }
         ]
@@ -37,8 +37,10 @@
         "icons/icon.icns",
         "icons/icon.ico"
       ],
+      "externalBin": [
+        "../src/backend/pulsarviewer-backend"
+      ],
       "resources": [
-        "../src/backend/pulsarviewer-backend",
         "../public"
       ]
     },
