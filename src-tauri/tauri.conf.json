@@ -27,7 +27,8 @@
       "active": true,
       "targets": [
         "dmg",
-        "app"
+        "app",
+        "appimage"
       ],
       "identifier": "com.pulsarviewer.app",
       "icon": [
