@@ -73,6 +73,7 @@ type Message struct {
 	Properties  map[string]string `json:"properties,omitempty"`
 	Key         string            `json:"key,omitempty"`
 	Payload     string            `json:"payload"`
+	RawPayload  []byte            `json:"-"`
 	JSON        interface{}       `json:"json,omitempty"`
 }
 
@@ -134,13 +135,18 @@ func (cm *ClientManager) StreamMessages(ctx context.Context, config ConsumerConf
 				// Reset retry count on successful message
 				retryCount = 0
 
-				msg := &Message{
+				rawPayload := pulsarMsg.Payload()
+			rawCopy := make([]byte, len(rawPayload))
+			copy(rawCopy, rawPayload)
+
+			msg := &Message{
 					ID:          pulsarMsg.ID().String(),
 					PublishTime: pulsarMsg.PublishTime().UnixMilli(),
 					EventTime:   pulsarMsg.EventTime().UnixMilli(),
 					Properties:  pulsarMsg.Properties(),
 					Key:         pulsarMsg.Key(),
-					Payload:     string(pulsarMsg.Payload()),
+					Payload:     string(rawPayload),
+					RawPayload:  rawCopy,
 				}
 
 				// Try to parse payload as JSON

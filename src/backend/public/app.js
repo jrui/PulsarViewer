@@ -166,6 +166,7 @@
     initialPosEl.value    = conn.initialPosition || 'latest';
     connectionLabelEl.value = label;
     refreshSavedConnections();
+    refreshTemplatesList();
   }
 
   saveConnectionBtn.addEventListener('click', () => {
@@ -560,11 +561,13 @@
       catch { addProducerMessage('error', 'Properties JSON is invalid'); sendBtn.disabled = false; return; }
     }
 
+    const useProtobuf = protoActive && sendAsProtobufEl.checked;
+
     try {
       const res = await fetch(`${API_BASE}/api/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ serviceUrl, topic, payload, key, properties, token }),
+        body: JSON.stringify({ serviceUrl, topic, payload, key, properties, token, useProtobuf }),
       });
       const result = await res.json();
       if (res.ok) {
@@ -858,6 +861,255 @@
     if (producers.length === 0) ptbody.innerHTML = '<tr><td colspan="4" class="td-empty">No active producers</td></tr>';
   }
 
+  // ─── Protobuf Schema ─────────────────────────────────────────────────────
+  let protoActive = false;
+  let protoFileContent = null;
+
+  const protoArrow = document.getElementById('proto-arrow');
+  const protoSectionBody = document.getElementById('proto-section-body');
+  const protoSourceEl = document.getElementById('protoSource');
+  const protoMsgTypeRow = document.getElementById('protoMsgTypeRow');
+  const protoMsgTypeEl = document.getElementById('protoMsgType');
+  const protoRegisterBtn = document.getElementById('protoRegisterBtn');
+  const protoClearBtn = document.getElementById('protoClearBtn');
+  const protoStatusEl = document.getElementById('protoStatus');
+  const protoEncodeBadge = document.getElementById('protoEncodeBadge');
+  const protoSendOptions = document.getElementById('protoSendOptions');
+  const sendAsProtobufEl = document.getElementById('sendAsProtobuf');
+
+  document.getElementById('proto-section-toggle').addEventListener('click', () => {
+    const collapsed = protoSectionBody.classList.toggle('collapsed');
+    protoArrow.textContent = collapsed ? '\u25B8' : '\u25BE';
+  });
+
+  // Proto tab switching (Paste / File)
+  document.querySelectorAll('.proto-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.proto-tab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const tab = btn.dataset.protoTab;
+      document.getElementById('proto-paste-panel').style.display = tab === 'paste' ? '' : 'none';
+      document.getElementById('proto-file-panel').style.display = tab === 'file' ? '' : 'none';
+    });
+  });
+
+  // File upload
+  const protoFileDrop = document.getElementById('protoFileDrop');
+  const protoFileInput = document.getElementById('protoFileInput');
+  const protoFileName = document.getElementById('protoFileName');
+
+  protoFileDrop.addEventListener('click', () => protoFileInput.click());
+  protoFileDrop.addEventListener('dragover', e => { e.preventDefault(); protoFileDrop.classList.add('drag-over'); });
+  protoFileDrop.addEventListener('dragleave', () => protoFileDrop.classList.remove('drag-over'));
+  protoFileDrop.addEventListener('drop', e => {
+    e.preventDefault();
+    protoFileDrop.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (file) readProtoFile(file);
+  });
+  protoFileInput.addEventListener('change', e => {
+    if (e.target.files[0]) readProtoFile(e.target.files[0]);
+    e.target.value = '';
+  });
+
+  function readProtoFile(file) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      protoFileContent = reader.result;
+      protoFileName.textContent = file.name;
+      protoFileName.style.display = 'block';
+    };
+    reader.readAsText(file);
+  }
+
+  protoRegisterBtn.addEventListener('click', registerProtoSchema);
+
+  async function registerProtoSchema() {
+    const activeTab = document.querySelector('.proto-tab.active')?.dataset.protoTab;
+    let source = activeTab === 'file' ? protoFileContent : protoSourceEl.value.trim();
+    if (!source) {
+      protoStatusEl.textContent = 'Provide a .proto definition first.';
+      protoStatusEl.className = 'proto-status proto-status-error';
+      return;
+    }
+
+    protoRegisterBtn.disabled = true;
+    protoStatusEl.textContent = 'Registering...';
+    protoStatusEl.className = 'proto-status proto-status-info';
+
+    try {
+      const res = await fetch(`${API_BASE}/api/proto/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source, messageType: protoMsgTypeEl.value || '' }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        protoStatusEl.textContent = data.error || 'Registration failed';
+        protoStatusEl.className = 'proto-status proto-status-error';
+        return;
+      }
+
+      const types = data.messageTypes || [];
+      if (types.length > 1 && !data.selected) {
+        protoMsgTypeEl.innerHTML = types.map(t => `<option value="${t}">${t}</option>`).join('');
+        protoMsgTypeRow.style.display = '';
+        protoStatusEl.textContent = `Found ${types.length} message types. Select one and register again.`;
+        protoStatusEl.className = 'proto-status proto-status-info';
+        return;
+      }
+
+      if (types.length > 1) {
+        protoMsgTypeEl.innerHTML = types.map(t => `<option value="${t}" ${t === data.selected ? 'selected' : ''}>${t}</option>`).join('');
+        protoMsgTypeRow.style.display = '';
+      }
+
+      setProtoActive(true, data.selected);
+      protoStatusEl.textContent = `Active: ${data.selected}`;
+      protoStatusEl.className = 'proto-status proto-status-ok';
+    } catch (e) {
+      protoStatusEl.textContent = 'Error: ' + e.message;
+      protoStatusEl.className = 'proto-status proto-status-error';
+    } finally {
+      protoRegisterBtn.disabled = false;
+    }
+  }
+
+  protoMsgTypeEl.addEventListener('change', async () => {
+    if (!protoActive) return;
+    const source = protoSourceEl.value.trim() || protoFileContent;
+    if (!source) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/proto/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source, messageType: protoMsgTypeEl.value }),
+      });
+      const data = await res.json();
+      if (data.ok && data.selected) {
+        protoStatusEl.textContent = `Active: ${data.selected}`;
+        protoStatusEl.className = 'proto-status proto-status-ok';
+      }
+    } catch {}
+  });
+
+  protoClearBtn.addEventListener('click', async () => {
+    try { await fetch(`${API_BASE}/api/proto/clear`, { method: 'POST' }); } catch {}
+    setProtoActive(false, '');
+    protoStatusEl.textContent = 'Schema cleared.';
+    protoStatusEl.className = 'proto-status proto-status-info';
+    protoMsgTypeRow.style.display = 'none';
+    setTimeout(() => { protoStatusEl.textContent = ''; }, 2000);
+  });
+
+  function setProtoActive(active, typeName) {
+    protoActive = active;
+    protoClearBtn.style.display = active ? '' : 'none';
+    protoEncodeBadge.style.display = active ? '' : 'none';
+    protoSendOptions.style.display = active ? '' : 'none';
+    if (active) {
+      protoEncodeBadge.textContent = typeName || 'protobuf';
+    }
+  }
+
+  document.getElementById('protoFillTemplate').addEventListener('click', async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/proto/template`);
+      const data = await res.json();
+      if (data.ok && data.template) {
+        document.getElementById('sendPayload').value = JSON.stringify(data.template, null, 2);
+      }
+    } catch (e) {
+      addProducerMessage('error', 'Failed to generate template: ' + e.message);
+    }
+  });
+
+  // ─── Message Templates ─────────────────────────────────────────────────────
+  const templateNameEl = document.getElementById('templateName');
+  const saveTemplateBtn = document.getElementById('saveTemplateBtn');
+  const templatesListEl = document.getElementById('templates-list');
+
+  function getTemplateStorageKey() {
+    return `pvTemplates_${selectedConnectionLabel || '_global'}`;
+  }
+
+  function loadTemplates() {
+    const key = getTemplateStorageKey();
+    try {
+      return JSON.parse(localStorage.getItem(key) || '{}');
+    } catch { return {}; }
+  }
+
+  function saveTemplates(templates) {
+    localStorage.setItem(getTemplateStorageKey(), JSON.stringify(templates));
+  }
+
+  function refreshTemplatesList() {
+    const templates = loadTemplates();
+    const names = Object.keys(templates);
+    templatesListEl.innerHTML = '';
+
+    if (names.length === 0) {
+      templatesListEl.innerHTML = '<div class="conn-empty">No saved templates</div>';
+      return;
+    }
+
+    names.forEach(name => {
+      const item = document.createElement('div');
+      item.className = 'template-item';
+      item.innerHTML = `
+        <span class="template-icon">&#9654;</span>
+        <span class="template-name" title="${name}">${name}</span>
+        <button class="template-load-btn btn-sm btn-ghost" title="Load">Load</button>
+        <button class="template-delete-btn btn-sm btn-ghost-danger" title="Delete">&times;</button>
+      `;
+      item.querySelector('.template-load-btn').addEventListener('click', e => {
+        e.stopPropagation();
+        loadTemplate(name);
+      });
+      item.querySelector('.template-delete-btn').addEventListener('click', e => {
+        e.stopPropagation();
+        deleteTemplate(name);
+      });
+      item.addEventListener('click', () => loadTemplate(name));
+      templatesListEl.appendChild(item);
+    });
+  }
+
+  function loadTemplate(name) {
+    const templates = loadTemplates();
+    const tmpl = templates[name];
+    if (!tmpl) return;
+    document.getElementById('sendKey').value = tmpl.key || '';
+    document.getElementById('sendProps').value = tmpl.properties || '';
+    document.getElementById('sendPayload').value = tmpl.payload || '';
+    templateNameEl.value = name;
+    addProducerMessage('info', `Loaded template: ${name}`);
+  }
+
+  function deleteTemplate(name) {
+    if (!confirm(`Delete template "${name}"?`)) return;
+    const templates = loadTemplates();
+    delete templates[name];
+    saveTemplates(templates);
+    refreshTemplatesList();
+  }
+
+  saveTemplateBtn.addEventListener('click', () => {
+    const name = templateNameEl.value.trim();
+    if (!name) { templateNameEl.focus(); return; }
+
+    const templates = loadTemplates();
+    templates[name] = {
+      key: document.getElementById('sendKey').value.trim(),
+      properties: document.getElementById('sendProps').value.trim(),
+      payload: document.getElementById('sendPayload').value,
+    };
+    saveTemplates(templates);
+    refreshTemplatesList();
+    addProducerMessage('info', `Saved template: ${name}`);
+  });
+
   // ─── Resizable panels ─────────────────────────────────────────────────────
   function makeResizer(resizerEl, targetEl, storageKey, minPx, maxPx) {
     // Restore saved size
@@ -909,6 +1161,23 @@
   // ─── Init ─────────────────────────────────────────────────────────────────
   (async () => {
     await refreshSavedConnections();
+    refreshTemplatesList();
     setConnected(false);
+
+    // Restore proto status on load
+    try {
+      const res = await fetch(`${API_BASE}/api/proto/status`);
+      const data = await res.json();
+      if (data.active) {
+        setProtoActive(true, data.messageType);
+        protoStatusEl.textContent = `Active: ${data.messageType}`;
+        protoStatusEl.className = 'proto-status proto-status-ok';
+        if (data.source) protoSourceEl.value = data.source;
+        if (data.messageTypes && data.messageTypes.length > 1) {
+          protoMsgTypeEl.innerHTML = data.messageTypes.map(t => `<option value="${t}" ${t === data.messageType ? 'selected' : ''}>${t}</option>`).join('');
+          protoMsgTypeRow.style.display = '';
+        }
+      }
+    } catch {}
   })();
 })();
