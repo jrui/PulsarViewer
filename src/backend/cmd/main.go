@@ -41,12 +41,14 @@ func main() {
 	httpHandler := server.NewHTTPHandler(pulsarClient, messageStore)
 
 	// Create HTTP server with optimizations
+	// WriteTimeout is intentionally omitted: setting it kills SSE/long-lived
+	// streaming connections after the deadline, causing spurious disconnects.
+	// Per-request write deadlines are set where needed (e.g. admin proxy).
 	httpServer := &http.Server{
 		Addr:           ":3000",
 		Handler:        httpHandler,
 		ReadTimeout:    30 * time.Second,
-		WriteTimeout:   30 * time.Second,
-		IdleTimeout:    90 * time.Second,
+		IdleTimeout:    120 * time.Second,
 		MaxHeaderBytes: 1 << 20,
 	}
 

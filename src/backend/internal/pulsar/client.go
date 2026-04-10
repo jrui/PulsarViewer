@@ -26,7 +26,7 @@ func (cm *ClientManager) GetOrCreateClient(serviceURL, token string) (pulsar.Cli
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
-	key := serviceURL
+	key := serviceURL + "\x00" + token
 	if client, ok := cm.clients[key]; ok {
 		return client, nil
 	}

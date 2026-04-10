@@ -97,11 +97,6 @@
   });
 
   async function switchTab(tab) {
-    // Tear down active consumer/producer when leaving those tabs
-    if (activeTab === 'consumer' && evtSource) {
-      await serverDisconnect();
-    }
-
     activeTab = tab;
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === `tab-${tab}`));
