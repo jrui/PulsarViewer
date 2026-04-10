@@ -65,9 +65,9 @@ jobs:
         run: rustup target add x86_64-pc-windows-msvc
 
       - name: Setup Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.24'
 
       - name: Install dependencies (Ubuntu)
         if: matrix.os == 'ubuntu-22.04'

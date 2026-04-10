@@ -28,7 +28,8 @@
       "targets": [
         "dmg",
         "app",
-        "appimage"
+        "appimage",
+        "msi"
       ],
       "identifier": "com.pulsarviewer.app",
       "icon": [

@@ -65,8 +65,55 @@
         </div>
       </div>
 
+      <!-- Protobuf Schema Section -->
+      <div id="proto-panel">
+        <div class="sidebar-section-title proto-section-header" id="proto-section-toggle">
+          <span>Protobuf Schema</span>
+          <span class="proto-toggle-arrow" id="proto-arrow">▸</span>
+        </div>
+        <div id="proto-section-body" class="proto-section-body collapsed">
+          <div class="proto-controls">
+            <div class="proto-tab-row">
+              <button class="proto-tab active" data-proto-tab="paste" id="protoTabPaste">Paste</button>
+              <button class="proto-tab" data-proto-tab="file" id="protoTabFile">File</button>
+            </div>
+            <div id="proto-paste-panel" class="proto-input-panel">
+              <textarea id="protoSource" rows="6" placeholder="syntax = &quot;proto3&quot;;&#10;&#10;message MyMessage {&#10;  string name = 1;&#10;  int32 id = 2;&#10;}" class="proto-textarea"></textarea>
+            </div>
+            <div id="proto-file-panel" class="proto-input-panel" style="display:none;">
+              <div class="proto-file-drop" id="protoFileDrop">
+                <span class="proto-file-icon">&#128196;</span>
+                <span class="proto-file-label">Drop .proto file or click to browse</span>
+                <input type="file" id="protoFileInput" accept=".proto" style="display:none;" />
+              </div>
+              <div id="protoFileName" class="proto-file-name"></div>
+            </div>
+            <div class="form-row" id="protoMsgTypeRow" style="display:none;">
+              <label>Message Type</label>
+              <select id="protoMsgType" class="toolbar-select"></select>
+            </div>
+            <div class="proto-action-row">
+              <button id="protoRegisterBtn" class="btn-primary btn-sm">Register Schema</button>
+              <button id="protoClearBtn" class="btn-ghost-danger btn-sm" style="display:none;">Clear</button>
+            </div>
+            <div id="protoStatus" class="proto-status"></div>
+          </div>
+        </div>
+      </div>
+
       <div id="sidebar-footer">
-        <small>Made with ♥ by <a href="https://www.linkedin.com/in/jrui/" target="_blank">jrui</a></small>
+        <div class="config-actions">
+          <button id="exportConfigBtn" class="btn-sm btn-ghost config-btn" title="Export connections, templates, and preferences to a JSON file">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Export Config
+          </button>
+          <button id="importConfigBtn" class="btn-sm btn-ghost config-btn" title="Import connections, templates, and preferences from a JSON file">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            Import Config
+          </button>
+          <input type="file" id="importConfigFile" accept=".json" style="display:none;" />
+        </div>
+        <small>Made with 🤖 and ❤️ by <a href="https://www.linkedin.com/in/jrui/" target="_blank">jrui</a></small>
       </div>
     </aside>
 
@@ -156,8 +203,15 @@
                 <textarea id="sendProps" rows="2" placeholder='{"key":"value"}'></textarea>
               </div>
               <div class="form-row">
-                <label>Payload <span class="required">*</span></label>
+                <label>
+                  Payload <span class="required">*</span>
+                  <span id="protoEncodeBadge" class="proto-badge" style="display:none;">protobuf</span>
+                </label>
                 <textarea id="sendPayload" rows="8" placeholder='{"example":true}' required></textarea>
+              </div>
+              <div class="proto-send-options" id="protoSendOptions" style="display:none;">
+                <label class="checkbox-label"><input type="checkbox" id="sendAsProtobuf" checked /> Encode as protobuf</label>
+                <button type="button" id="protoFillTemplate" class="btn-sm btn-ghost">Fill Template</button>
               </div>
               <div class="producer-actions">
                 <button type="submit" id="sendBtn" class="btn-primary">Send Message</button>
@@ -171,6 +225,22 @@
                 </div>
               </div>
             </form>
+
+            <!-- Message Templates -->
+            <div class="templates-section">
+              <div class="section-title templates-title-row">
+                <span>Message Templates</span>
+              </div>
+              <div class="templates-controls">
+                <div class="template-save-row">
+                  <input type="text" id="templateName" placeholder="Template name..." class="template-name-input" />
+                  <button type="button" id="saveTemplateBtn" class="btn-sm btn-secondary">Save</button>
+                </div>
+                <div id="templates-list" class="templates-list">
+                  <div class="conn-empty">No saved templates</div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div id="producer-log" class="producer-log">

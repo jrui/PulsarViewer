@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 
 	pulsarclient "github.com/apache/pulsar-client-go/pulsar"
 	"github.com/gorilla/websocket"
+	"github.com/jrui/pulsarviewer/internal/proto"
 	"github.com/jrui/pulsarviewer/internal/pulsar"
 	"github.com/jrui/pulsarviewer/internal/store"
 	"github.com/jrui/pulsarviewer/internal/stream"
@@ -26,6 +28,7 @@ type HTTPHandler struct {
 	pulsarClient  *pulsar.ClientManager
 	messageStore  *store.MessageStore
 	streamManager *stream.StreamManager
+	protoRegistry *proto.Registry
 	upgrader      websocket.Upgrader
 	connections   map[string]*ConnectionState
 	mu            sync.RWMutex
@@ -45,6 +48,7 @@ func NewHTTPHandler(pulsarClient *pulsar.ClientManager, messageStore *store.Mess
 		pulsarClient:  pulsarClient,
 		messageStore:  messageStore,
 		streamManager: stream.NewStreamManager(pulsarClient, messageStore),
+		protoRegistry: proto.NewRegistry(),
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -125,6 +129,14 @@ func NewHTTPHandler(pulsarClient *pulsar.ClientManager, messageStore *store.Mess
 	mux.HandleFunc("/api/admin/subscriptions", handler.handleAdminSubscriptions)
 	mux.HandleFunc("/api/admin/namespaces", handler.handleAdminNamespaces)
 	mux.HandleFunc("/api/admin/check-permissions", handler.handleAdminCheckPermissions)
+
+	// Protobuf schema endpoints
+	mux.HandleFunc("/api/proto/register", handler.handleProtoRegister)
+	mux.HandleFunc("/api/proto/decode", handler.handleProtoDecode)
+	mux.HandleFunc("/api/proto/encode", handler.handleProtoEncode)
+	mux.HandleFunc("/api/proto/status", handler.handleProtoStatus)
+	mux.HandleFunc("/api/proto/clear", handler.handleProtoClear)
+	mux.HandleFunc("/api/proto/template", handler.handleProtoTemplate)
 
 	// Health check
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -247,10 +259,13 @@ func (h *HTTPHandler) handleSendMessage(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var req struct {
-		ServiceURL string `json:"serviceUrl"`
-		Topic      string `json:"topic"`
-		Payload    string `json:"payload"`
-		Key        string `json:"key,omitempty"`
+		ServiceURL  string            `json:"serviceUrl"`
+		Topic       string            `json:"topic"`
+		Payload     string            `json:"payload"`
+		Key         string            `json:"key,omitempty"`
+		Token       string            `json:"token,omitempty"`
+		Properties  map[string]string `json:"properties,omitempty"`
+		UseProtobuf bool              `json:"useProtobuf,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -263,7 +278,21 @@ func (h *HTTPHandler) handleSendMessage(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	client, err := h.pulsarClient.GetOrCreateClient(req.ServiceURL, "")
+	var payloadBytes []byte
+	if req.UseProtobuf && h.protoRegistry.IsActive() {
+		encoded, err := h.protoRegistry.Encode(req.Payload)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]interface{}{"error": "Protobuf encode failed: " + err.Error()})
+			return
+		}
+		payloadBytes = encoded
+	} else {
+		payloadBytes = []byte(req.Payload)
+	}
+
+	client, err := h.pulsarClient.GetOrCreateClient(req.ServiceURL, req.Token)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -281,10 +310,15 @@ func (h *HTTPHandler) handleSendMessage(w http.ResponseWriter, r *http.Request) 
 	}
 	defer producer.Close()
 
-	msgID, err := producer.Send(context.Background(), &pulsarclient.ProducerMessage{
-		Payload: []byte(req.Payload),
+	prodMsg := &pulsarclient.ProducerMessage{
+		Payload: payloadBytes,
 		Key:     req.Key,
-	})
+	}
+	if len(req.Properties) > 0 {
+		prodMsg.Properties = req.Properties
+	}
+
+	msgID, err := producer.Send(context.Background(), prodMsg)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -701,7 +735,7 @@ func (h *HTTPHandler) handleWebSocketStream(conn *websocket.Conn, r *http.Reques
 			}
 			// Store message but don't send it through WebSocket
 			// Pause buffering when first page (100) of messages is reached
-			storeMsg := toStoreMessage(msg)
+			storeMsg := toStoreMessage(msg, h.protoRegistry)
 			if storeMsg != nil {
 				// Only add to stores if buffering is enabled or we're below threshold
 				if h.messageStore.IsBuffering() || h.messageStore.Count() < 100 {
@@ -793,14 +827,32 @@ func (h *HTTPHandler) handleHTTPStream(w http.ResponseWriter, r *http.Request) {
 			messages := h.messageStore.GetAll()
 			if len(messages) > lastIndex {
 				for _, msg := range messages[lastIndex:] {
+					payload := msg.Payload
+					jsonField := msg.JSON
+					props := msg.Properties
+
+					if h.protoRegistry.IsActive() {
+						if decoded, ok := h.protoRegistry.TryDecode([]byte(payload)); ok {
+							payload = decoded
+							var jp interface{}
+							if err := json.Unmarshal([]byte(decoded), &jp); err == nil {
+								jsonField = jp
+							}
+							if props == nil {
+								props = make(map[string]string)
+							}
+							props["_pv_proto_decoded"] = "true"
+						}
+					}
+
 					if err := writeSSEEvent(w, "message", map[string]interface{}{
 						"id":          msg.ID,
 						"publishTime": msg.PublishTime,
 						"eventTime":   msg.EventTime,
-						"properties":  msg.Properties,
+						"properties":  props,
 						"key":         msg.Key,
-						"payload":     msg.Payload,
-						"json":        msg.JSON,
+						"payload":     payload,
+						"json":        jsonField,
 					}); err != nil {
 						return
 					}
@@ -842,11 +894,13 @@ func (h *HTTPHandler) handleHTTPStream(w http.ResponseWriter, r *http.Request) {
 }
 
 // toStoreMessage converts a pulsar.Message to the store.Message shape used by buffers.
-func toStoreMessage(msg *pulsar.Message) *store.Message {
+// If a proto registry is provided and active, it attempts to decode the payload as protobuf.
+func toStoreMessage(msg *pulsar.Message, registry *proto.Registry) *store.Message {
 	if msg == nil {
 		return nil
 	}
-	return &store.Message{
+
+	storeMsg := &store.Message{
 		ID:          msg.ID,
 		PublishTime: msg.PublishTime,
 		EventTime:   msg.EventTime,
@@ -855,6 +909,34 @@ func toStoreMessage(msg *pulsar.Message) *store.Message {
 		Payload:     msg.Payload,
 		JSON:        msg.JSON,
 	}
+
+	if registry != nil && registry.IsActive() {
+		if decoded, ok := registry.TryDecode([]byte(msg.Payload)); ok {
+			storeMsg.Payload = decoded
+			var jsonPayload interface{}
+			if err := json.Unmarshal([]byte(decoded), &jsonPayload); err == nil {
+				storeMsg.JSON = jsonPayload
+			}
+			if storeMsg.Properties == nil {
+				storeMsg.Properties = make(map[string]string)
+			}
+			storeMsg.Properties["_pv_proto_decoded"] = "true"
+		} else if msg.RawPayload != nil {
+			if decoded, ok := registry.TryDecode(msg.RawPayload); ok {
+				storeMsg.Payload = decoded
+				var jsonPayload interface{}
+				if err := json.Unmarshal([]byte(decoded), &jsonPayload); err == nil {
+					storeMsg.JSON = jsonPayload
+				}
+				if storeMsg.Properties == nil {
+					storeMsg.Properties = make(map[string]string)
+				}
+				storeMsg.Properties["_pv_proto_decoded"] = "true"
+			}
+		}
+	}
+
+	return storeMsg
 }
 
 func (h *HTTPHandler) handleDisconnect(w http.ResponseWriter, r *http.Request) {
@@ -1240,6 +1322,195 @@ func topicToAdminPath(topic, suffix string) string {
 	topic = strings.TrimPrefix(topic, "persistent://")
 	topic = strings.TrimPrefix(topic, "non-persistent://")
 	return fmt.Sprintf("/admin/v2/%s/%s/%s", scheme, topic, suffix)
+}
+
+// ─── Protobuf API handlers ─────────────────────────────────────────────────
+
+func (h *HTTPHandler) handleProtoRegister(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	contentType := r.Header.Get("Content-Type")
+
+	var protoSource, msgType string
+
+	if strings.HasPrefix(contentType, "multipart/form-data") {
+		if err := r.ParseMultipartForm(10 << 20); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]interface{}{"error": "Failed to parse form: " + err.Error()})
+			return
+		}
+
+		file, _, err := r.FormFile("file")
+		if err == nil {
+			defer file.Close()
+			data, err := io.ReadAll(file)
+			if err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]interface{}{"error": "Failed to read file: " + err.Error()})
+				return
+			}
+			protoSource = string(data)
+		} else {
+			protoSource = r.FormValue("source")
+		}
+		msgType = r.FormValue("messageType")
+	} else {
+		var req struct {
+			Source      string `json:"source"`
+			MessageType string `json:"messageType"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]interface{}{"error": "Invalid JSON: " + err.Error()})
+			return
+		}
+		protoSource = req.Source
+		msgType = req.MessageType
+	}
+
+	if strings.TrimSpace(protoSource) == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "No proto source provided"})
+		return
+	}
+
+	result, err := h.protoRegistry.Register(protoSource, msgType)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":           true,
+		"messageTypes": result.MessageTypes,
+		"selected":     result.Selected,
+	})
+}
+
+func (h *HTTPHandler) handleProtoDecode(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	var req struct {
+		Data string `json:"data"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Invalid request"})
+		return
+	}
+
+	decoded, err := h.protoRegistry.DecodeBase64(req.Data)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":   true,
+		"json": json.RawMessage(decoded),
+	})
+}
+
+func (h *HTTPHandler) handleProtoEncode(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	var req struct {
+		JSON json.RawMessage `json:"json"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Invalid request"})
+		return
+	}
+
+	encoded, err := h.protoRegistry.Encode(string(req.JSON))
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":     true,
+		"base64": base64.StdEncoding.EncodeToString(encoded),
+	})
+}
+
+func (h *HTTPHandler) handleProtoStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	active := h.protoRegistry.IsActive()
+	resp := map[string]interface{}{
+		"active": active,
+	}
+
+	if active {
+		resp["messageType"] = h.protoRegistry.ActiveType()
+		resp["messageTypes"] = h.protoRegistry.GetMessageTypes()
+		source, _ := h.protoRegistry.GetSchema()
+		resp["source"] = source
+		if fields, err := h.protoRegistry.DescribeFields(); err == nil {
+			resp["fields"] = fields
+		}
+	}
+
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (h *HTTPHandler) handleProtoClear(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	h.protoRegistry.Clear()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+}
+
+func (h *HTTPHandler) handleProtoTemplate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	tmpl, err := h.protoRegistry.GenerateTemplate()
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":       true,
+		"template": json.RawMessage(tmpl),
+	})
 }
 
 // writeSSEEvent writes a Server-Sent Event to the response writer
