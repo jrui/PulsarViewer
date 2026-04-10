@@ -1,0 +1,84 @@
+name: Integration Tests
+
+on:
+  pull_request:
+    branches:
+      - master
+      - main
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Start Pulsar container
+        run: |
+          docker run -d --name pulsar \
+            -p 6650:6650 -p 8080:8080 \
+            -e PULSAR_STANDALONE_USE_ZOOKEEPER=1 \
+            apachepulsar/pulsar:3.3.6 \
+            bin/pulsar standalone
+          echo "Waiting for Pulsar broker to be healthy..."
+          for i in $(seq 1 90); do
+            if curl -sf http://localhost:8080/admin/v2/clusters > /dev/null 2>&1; then
+              echo "Pulsar is ready after ${i}s"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Pulsar failed to start within timeout"
+          docker logs pulsar
+          exit 1
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache-dependency-path: src/backend/go.sum
+
+      - name: Download Go dependencies
+        working-directory: src/backend
+        run: go mod download
+
+      - name: Build backend
+        working-directory: src/backend
+        run: go build -o pulsarviewer-backend ./cmd/main.go
+
+      - name: Start PulsarViewer backend
+        working-directory: src/backend
+        run: |
+          ./pulsarviewer-backend &
+          echo $! > /tmp/pv-backend.pid
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000/health > /dev/null 2>&1; then
+              echo "PulsarViewer backend ready after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+
+      - name: Run integration tests
+        working-directory: src/backend
+        env:
+          PULSAR_SERVICE_URL: pulsar://localhost:6650
+          PV_BASE_URL: http://localhost:3000
+        run: go test -v -count=1 -timeout=300s -tags=integration ./internal/integration/...
+
+      - name: Stop backend
+        if: always()
+        run: |
+          if [ -f /tmp/pv-backend.pid ]; then
+            kill "$(cat /tmp/pv-backend.pid)" 2>/dev/null || true
+          fi
+
+      - name: Collect Pulsar logs on failure
+        if: failure()
+        run: docker logs pulsar
+
+      - name: Stop Pulsar container
+        if: always()
+        run: docker rm -f pulsar 2>/dev/null || true
