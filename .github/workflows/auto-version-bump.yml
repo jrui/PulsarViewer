@@ -32,17 +32,17 @@ jobs:
 
       - name: Bump patch version
         run: |
-          # Bump version without creating a tag (tag will be created after merge)
+          OLD_VERSION=$(node -p "require('./package.json').version")
           npm version patch --no-git-tag-version
           VERSION=$(node -p "require('./package.json').version")
           
-          # Update Cargo.toml version
           sed -i "s/^version = \".*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
-          
-          # Update tauri.conf.json version
           sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" src-tauri/tauri.conf.json
           
-          git add package.json package-lock.json src-tauri/Cargo.toml src-tauri/tauri.conf.json
+          # Update the workspace package version in Cargo.lock to stay in sync
+          sed -i "/^name = \"pulsarviewer\"/{n;s/^version = \"$OLD_VERSION\"/version = \"$VERSION\"/}" src-tauri/Cargo.lock
+          
+          git add package.json package-lock.json src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json
           git commit -m "chore: bump version to $VERSION"
 
       - name: Push version bump to master

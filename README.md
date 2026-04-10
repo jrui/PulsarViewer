@@ -60,6 +60,15 @@ Once active:
 - In the Producer tab, a **protobuf** badge appears next to the Payload label, and an **Encode as protobuf** checkbox lets you send binary-encoded messages.
 - Click **Fill Template** to populate the payload with a JSON skeleton matching the selected message type.
 
+### 6. Export and import configuration
+
+At the bottom of the sidebar, use **Export Config** and **Import Config** to share your setup:
+
+- **Export** saves all saved connections, message templates, and UI preferences to a `.json` file.
+- **Import** loads a previously exported file. If connections with the same name already exist, you're prompted to overwrite or skip duplicates.
+
+This is useful for migrating from the browser version to the desktop app, or sharing a team's connection setup.
+
 ---
 
 ## Installation Options

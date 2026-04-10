@@ -102,6 +102,17 @@
       </div>
 
       <div id="sidebar-footer">
+        <div class="config-actions">
+          <button id="exportConfigBtn" class="btn-sm btn-ghost config-btn" title="Export connections, templates, and preferences to a JSON file">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Export Config
+          </button>
+          <button id="importConfigBtn" class="btn-sm btn-ghost config-btn" title="Import connections, templates, and preferences from a JSON file">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            Import Config
+          </button>
+          <input type="file" id="importConfigFile" accept=".json" style="display:none;" />
+        </div>
         <small>Made with 🤖 and ❤️ by <a href="https://www.linkedin.com/in/jrui/" target="_blank">jrui</a></small>
       </div>
     </aside>

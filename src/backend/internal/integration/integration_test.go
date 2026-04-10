@@ -189,6 +189,9 @@ func TestStaticFrontendServed(t *testing.T) {
 		"proto-panel",
 		"sendPayload",
 		"templates-list",
+		"exportConfigBtn",
+		"importConfigBtn",
+		"importConfigFile",
 	}
 	for _, elem := range requiredElements {
 		if !strings.Contains(html, elem) {
@@ -687,6 +690,66 @@ func TestClearMessages(t *testing.T) {
 	msgsData := readJSON(t, msgsResp)
 	if total, _ := msgsData["totalMessages"].(float64); total != 0 {
 		t.Errorf("expected 0 messages after clear, got %v", total)
+	}
+}
+
+func TestConfigExportImportFrontendCode(t *testing.T) {
+	stop := startBackend(t)
+	defer stop()
+	base := baseURL(t)
+
+	resp := jsonGet(t, base+"/app.js")
+	requireStatus(t, resp, 200)
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	js := string(body)
+
+	requiredSymbols := []string{
+		"gatherConfig",
+		"exportConfig",
+		"importConfig",
+		"_pv_config_version",
+		"pulsarConnections",
+		"pvTemplates_",
+		"pv_sidebar_width",
+		"pv_topic_browser_width",
+		"exportConfigBtn",
+		"importConfigBtn",
+		"importConfigFile",
+	}
+	for _, sym := range requiredSymbols {
+		if !strings.Contains(js, sym) {
+			t.Errorf("app.js missing expected symbol: %q", sym)
+		}
+	}
+}
+
+func TestConfigExportStructure(t *testing.T) {
+	stop := startBackend(t)
+	defer stop()
+	base := baseURL(t)
+
+	// Verify the index page delivers the hidden file input for import
+	resp := jsonGet(t, base+"/")
+	requireStatus(t, resp, 200)
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	html := string(body)
+
+	checks := map[string]string{
+		"export button":       `id="exportConfigBtn"`,
+		"import button":       `id="importConfigBtn"`,
+		"hidden file input":   `id="importConfigFile"`,
+		"accept .json":        `accept=".json"`,
+		"export icon SVG":     `Export Config`,
+		"import icon SVG":     `Import Config`,
+	}
+	for label, needle := range checks {
+		if !strings.Contains(html, needle) {
+			t.Errorf("index.html missing %s: expected to find %q", label, needle)
+		}
 	}
 }
 

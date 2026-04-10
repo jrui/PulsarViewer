@@ -1105,6 +1105,122 @@
     addProducerMessage('info', `Saved template: ${name}`);
   });
 
+  // ─── Config Export / Import ──────────────────────────────────────────────
+  document.getElementById('exportConfigBtn').addEventListener('click', exportConfig);
+  document.getElementById('importConfigBtn').addEventListener('click', () => {
+    document.getElementById('importConfigFile').click();
+  });
+  document.getElementById('importConfigFile').addEventListener('change', e => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    const reader = new FileReader();
+    reader.onload = () => importConfig(reader.result);
+    reader.readAsText(file);
+  });
+
+  function gatherConfig() {
+    const config = {
+      _pv_config_version: 1,
+      _pv_exported_at: new Date().toISOString(),
+      connections: JSON.parse(localStorage.getItem('pulsarConnections') || '{}'),
+      templates: {},
+      preferences: {},
+    };
+
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key.startsWith('pvTemplates_')) {
+        try { config.templates[key] = JSON.parse(localStorage.getItem(key)); } catch {}
+      }
+    }
+
+    const sidebarW = localStorage.getItem('pv_sidebar_width');
+    const topicW = localStorage.getItem('pv_topic_browser_width');
+    if (sidebarW) config.preferences.pv_sidebar_width = parseInt(sidebarW);
+    if (topicW) config.preferences.pv_topic_browser_width = parseInt(topicW);
+
+    return config;
+  }
+
+  function exportConfig() {
+    const config = gatherConfig();
+    const connCount = Object.keys(config.connections).length;
+    const tmplCount = Object.values(config.templates).reduce((sum, t) => sum + Object.keys(t).length, 0);
+
+    const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `pulsarviewer-config-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+
+    addConsumerMessage('info', `Exported config: ${connCount} connection(s), ${tmplCount} template(s).`);
+  }
+
+  function importConfig(jsonStr) {
+    let config;
+    try {
+      config = JSON.parse(jsonStr);
+    } catch {
+      addConsumerMessage('error', 'Invalid config file — could not parse JSON.');
+      return;
+    }
+
+    if (!config._pv_config_version) {
+      addConsumerMessage('error', 'Invalid config file — missing version marker.');
+      return;
+    }
+
+    const existing = JSON.parse(localStorage.getItem('pulsarConnections') || '{}');
+    const incoming = config.connections || {};
+    const conflicts = Object.keys(incoming).filter(k => existing[k]);
+
+    let merge = true;
+    if (conflicts.length > 0) {
+      merge = confirm(
+        `${conflicts.length} connection(s) already exist (${conflicts.join(', ')}).\n\nOverwrite duplicates?`
+      );
+      if (!merge) {
+        Object.keys(incoming).forEach(k => {
+          if (existing[k]) delete incoming[k];
+        });
+      }
+    }
+
+    const merged = { ...existing, ...incoming };
+    localStorage.setItem('pulsarConnections', JSON.stringify(merged));
+
+    if (config.templates) {
+      for (const [key, value] of Object.entries(config.templates)) {
+        if (!key.startsWith('pvTemplates_')) continue;
+        const existingTmpl = JSON.parse(localStorage.getItem(key) || '{}');
+        localStorage.setItem(key, JSON.stringify({ ...existingTmpl, ...value }));
+      }
+    }
+
+    if (config.preferences) {
+      if (config.preferences.pv_sidebar_width) {
+        localStorage.setItem('pv_sidebar_width', config.preferences.pv_sidebar_width);
+        document.getElementById('sidebar').style.width = config.preferences.pv_sidebar_width + 'px';
+      }
+      if (config.preferences.pv_topic_browser_width) {
+        localStorage.setItem('pv_topic_browser_width', config.preferences.pv_topic_browser_width);
+        const tb = document.querySelector('.topic-browser');
+        if (tb) tb.style.width = config.preferences.pv_topic_browser_width + 'px';
+      }
+    }
+
+    const connCount = Object.keys(incoming).length;
+    const tmplCount = config.templates
+      ? Object.values(config.templates).reduce((sum, t) => sum + Object.keys(t).length, 0)
+      : 0;
+
+    refreshSavedConnections();
+    refreshTemplatesList();
+    addConsumerMessage('info', `Imported config: ${connCount} connection(s), ${tmplCount} template(s).`);
+  }
+
   // ─── Resizable panels ─────────────────────────────────────────────────────
   function makeResizer(resizerEl, targetEl, storageKey, minPx, maxPx) {
     // Restore saved size
