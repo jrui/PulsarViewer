@@ -914,6 +914,117 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .td-addr { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
 .td-empty { text-align: center; color: var(--text-muted); font-style: italic; padding: 16px; }
 
+/* Partition grouping in topic browser */
+.topic-group { position: relative; }
+
+.partition-badge {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--accent);
+  background: rgba(77, 143, 209, 0.12);
+  border: 1px solid rgba(77, 143, 209, 0.25);
+  padding: 1px 5px;
+  border-radius: 8px;
+  margin-left: auto;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+}
+
+.partition-expand-btn {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 10px;
+  cursor: pointer;
+  padding: 0 2px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.partition-expand-btn:hover { color: var(--text-bright); }
+
+.partition-list {
+  overflow: hidden;
+  transition: max-height 200ms ease;
+  max-height: 600px;
+}
+.partition-list.collapsed { max-height: 0; }
+
+.partition-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px 28px;
+  cursor: pointer;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  transition: background 100ms;
+}
+.partition-item:hover { background: var(--bg-hover); color: var(--text-primary); }
+.partition-dot { font-size: 6px; color: var(--border-light); }
+
+/* Partition summary cards */
+.partition-summary-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 6px;
+}
+
+.partition-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  cursor: pointer;
+  transition: border-color 150ms;
+}
+.partition-card:hover { border-color: var(--accent); }
+
+.partition-card-index {
+  font-size: 10px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+.partition-card-loading {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.pc-stat {
+  display: inline-block;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  margin-right: 6px;
+}
+
+/* Auto-refresh controls */
+.autorefresh-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.autorefresh-select {
+  width: 50px;
+  font-size: 10px;
+  padding: 2px 4px;
+}
+
+.autorefresh-badge {
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--text-muted);
+  padding: 2px 6px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+#autorefresh-toggle.active svg { color: var(--accent); }
+#autorefresh-toggle:not(.active) { opacity: 0.5; }
+
 /* ─── Modals ──────────────────────────────────────────────────────────────── */
 .modal-overlay {
   position: fixed; inset: 0;

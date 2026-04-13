@@ -282,6 +282,19 @@
               <div class="stats-topic-header">
                 <span id="mgmt-topic-name" class="topic-chip"></span>
                 <button id="refreshStatsBtn" class="btn-sm btn-ghost">↻ Refresh</button>
+                <div class="autorefresh-controls">
+                  <button id="autorefresh-toggle" class="btn-sm btn-ghost active" title="Toggle auto-refresh">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                  </button>
+                  <select id="autorefresh-interval" class="toolbar-select autorefresh-select">
+                    <option value="5">5s</option>
+                    <option value="10" selected>10s</option>
+                    <option value="15">15s</option>
+                    <option value="30">30s</option>
+                    <option value="60">60s</option>
+                  </select>
+                  <span id="autorefresh-badge" class="autorefresh-badge">Auto-refresh: 10s</span>
+                </div>
               </div>
 
               <!-- Stat cards -->

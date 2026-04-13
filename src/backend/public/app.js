@@ -45,6 +45,10 @@
   let currentUseRegex = false;
   let selectedConnectionLabel = null;
   let selectedTopic = null; // for management tab
+  let managementAutoRefreshTimer = null;
+  let managementAutoRefreshEnabled = true;
+  let managementAutoRefreshInterval = 10; // seconds
+  let managementTopicsLoaded = false;
 
   const MESSAGES_PER_PAGE = 100;
   const highlightCache = new Map();
@@ -102,8 +106,21 @@
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === `tab-${tab}`));
 
     if (tab === 'management' && isConnected) {
-      // Management tab opened — load namespace topics if connected
-      loadTopics();
+      deriveNamespaceFromTopic();
+      if (!managementTopicsLoaded) loadTopics();
+      startAutoRefresh();
+    } else {
+      stopAutoRefresh();
+    }
+  }
+
+  function deriveNamespaceFromTopic() {
+    const topic = topicEl.value.trim();
+    if (!topic) return;
+    // persistent://tenant/namespace/topicname → tenant/namespace
+    const match = topic.match(/^(?:persistent|non-persistent):\/\/([^/]+\/[^/]+)\//);
+    if (match) {
+      document.getElementById('namespaceInput').value = match[1];
     }
   }
 
@@ -116,6 +133,21 @@
     tabStatusBadge.className = connected ? 'badge-connected' : 'badge-disconnected';
     connectBtn.disabled = connected;
     disconnectBtn.disabled = !connected;
+
+    if (connected) {
+      deriveNamespaceFromTopic();
+      managementTopicsLoaded = false;
+      loadTopicsInBackground();
+    } else {
+      stopAutoRefresh();
+      managementTopicsLoaded = false;
+    }
+  }
+
+  function loadTopicsInBackground() {
+    const serviceUrl = serviceUrlEl.value.trim();
+    if (!serviceUrl) return;
+    loadTopics();
   }
 
   // ─── Auth error toast ────────────────────────────────────────────────────────
@@ -652,14 +684,57 @@
   });
 
   // ─── Management Tab ───────────────────────────────────────────────────────
-  document.getElementById('loadTopicsBtn').addEventListener('click', loadTopics);
+  document.getElementById('loadTopicsBtn').addEventListener('click', () => {
+    managementTopicsLoaded = false;
+    loadTopics();
+  });
   document.getElementById('refreshStatsBtn').addEventListener('click', () => {
     if (selectedTopic) loadTopicStats(selectedTopic);
+  });
+  document.getElementById('autorefresh-toggle').addEventListener('click', () => {
+    managementAutoRefreshEnabled = !managementAutoRefreshEnabled;
+    const btn = document.getElementById('autorefresh-toggle');
+    btn.classList.toggle('active', managementAutoRefreshEnabled);
+    if (managementAutoRefreshEnabled) {
+      startAutoRefresh();
+    } else {
+      stopAutoRefresh();
+    }
+    updateAutoRefreshCountdown();
+  });
+  document.getElementById('autorefresh-interval').addEventListener('change', e => {
+    managementAutoRefreshInterval = parseInt(e.target.value, 10) || 10;
+    if (managementAutoRefreshEnabled) startAutoRefresh();
+    updateAutoRefreshCountdown();
   });
   document.getElementById('checkPermsBtn').addEventListener('click', checkPermissions);
   document.getElementById('permsModalClose').addEventListener('click', () => {
     document.getElementById('permsModal').style.display = 'none';
   });
+
+  function groupPartitionedTopics(topics) {
+    const groups = new Map();
+    const partitionRe = /-partition-(\d+)$/;
+
+    topics.forEach(fullName => {
+      const shortName = fullName.replace(/^(persistent|non-persistent):\/\/[^/]+\/[^/]+\//, '');
+      const match = shortName.match(partitionRe);
+      if (match) {
+        const baseName = shortName.replace(partitionRe, '');
+        const prefix = fullName.slice(0, fullName.length - shortName.length);
+        if (!groups.has(baseName)) {
+          groups.set(baseName, { baseName, prefix, partitions: [] });
+        }
+        groups.get(baseName).partitions.push({ index: parseInt(match[1], 10), fullName });
+      } else {
+        const prefix = fullName.slice(0, fullName.length - shortName.length);
+        groups.set(shortName, { baseName: shortName, prefix, partitions: [{ index: -1, fullName }] });
+      }
+    });
+
+    groups.forEach(g => g.partitions.sort((a, b) => a.index - b.index));
+    return Array.from(groups.values());
+  }
 
   async function loadTopics() {
     const serviceUrl = serviceUrlEl.value.trim();
@@ -671,7 +746,7 @@
     const namespace = document.getElementById('namespaceInput').value.trim() || 'public/default';
     const token = tokenEl.value.trim();
     const listEl = document.getElementById('topic-list');
-    listEl.innerHTML = '<div class="placeholder-text">Loading…</div>';
+    listEl.innerHTML = '<div class="placeholder-text">Loading\u2026</div>';
 
     try {
       const params = new URLSearchParams({ serviceUrl, namespace });
@@ -682,7 +757,7 @@
       if (!res.ok) {
         const msg = data.error || 'Failed to load topics';
         listEl.innerHTML = `<div class="placeholder-text error-text">${msg}</div>`;
-        if (data.authFailed) showAuthError('No topics returned — token may lack admin read permissions on this namespace. Try verifying with: curl -H "Authorization: Bearer <token>" <adminUrl>/admin/v2/persistent/<namespace>');
+        if (data.authFailed) showAuthError('No topics returned \u2014 token may lack admin read permissions on this namespace. Try verifying with: curl -H "Authorization: Bearer <token>" <adminUrl>/admin/v2/persistent/<namespace>');
         return;
       }
 
@@ -693,25 +768,107 @@
       const topics = data.topics || [];
       if (topics.length === 0) {
         listEl.innerHTML = '<div class="placeholder-text">No topics found in this namespace.</div>';
+        managementTopicsLoaded = true;
         return;
       }
 
+      const grouped = groupPartitionedTopics(topics);
       listEl.innerHTML = '';
-      topics.forEach(t => {
+
+      grouped.forEach(group => {
+        const isPartitioned = group.partitions.length > 1 || group.partitions[0]?.index >= 0;
+        const firstPartition = group.partitions[0]?.fullName;
         const item = document.createElement('div');
-        item.className = 'topic-item' + (t === selectedTopic ? ' active' : '');
-        const shortName = t.replace(/^(persistent|non-persistent):\/\/[^/]+\/[^/]+\//, '');
-        item.innerHTML = `<span class="topic-icon">▸</span><span class="topic-name" title="${t}">${shortName}</span>`;
-        item.addEventListener('click', () => {
+        item.className = 'topic-group';
+
+        const header = document.createElement('div');
+        header.className = 'topic-item' + (selectedTopic === firstPartition ? ' active' : '');
+        const partBadge = isPartitioned
+          ? `<span class="partition-badge" title="${group.partitions.length} partitions">${group.partitions.length}p</span>`
+          : '';
+        header.innerHTML = `<span class="topic-icon">\u25B8</span><span class="topic-name" title="${group.prefix}${group.baseName}">${group.baseName}</span>${partBadge}`;
+
+        header.addEventListener('click', () => {
           document.querySelectorAll('.topic-item').forEach(i => i.classList.remove('active'));
-          item.classList.add('active');
-          selectedTopic = t;
-          loadTopicStats(t);
+          header.classList.add('active');
+          selectedTopic = firstPartition;
+          if (isPartitioned) {
+            loadPartitionedTopicStats(group);
+          } else {
+            loadTopicStats(firstPartition);
+          }
         });
+        item.appendChild(header);
+
+        if (isPartitioned) {
+          const partList = document.createElement('div');
+          partList.className = 'partition-list collapsed';
+          partList.id = `partitions-${group.baseName.replace(/[^a-zA-Z0-9-]/g, '_')}`;
+
+          group.partitions.forEach(p => {
+            const pItem = document.createElement('div');
+            pItem.className = 'partition-item';
+            pItem.innerHTML = `<span class="partition-dot">\u25AA</span><span class="partition-name">partition-${p.index}</span>`;
+            pItem.addEventListener('click', e => {
+              e.stopPropagation();
+              document.querySelectorAll('.topic-item').forEach(i => i.classList.remove('active'));
+              header.classList.add('active');
+              selectedTopic = p.fullName;
+              loadTopicStats(p.fullName);
+            });
+            partList.appendChild(pItem);
+          });
+
+          const expandBtn = document.createElement('button');
+          expandBtn.className = 'partition-expand-btn';
+          expandBtn.textContent = '\u25B8';
+          expandBtn.title = 'Show partitions';
+          expandBtn.addEventListener('click', e => {
+            e.stopPropagation();
+            const collapsed = partList.classList.toggle('collapsed');
+            expandBtn.textContent = collapsed ? '\u25B8' : '\u25BE';
+          });
+          header.prepend(expandBtn);
+          header.querySelector('.topic-icon').remove();
+
+          item.appendChild(partList);
+        }
+
         listEl.appendChild(item);
       });
+
+      managementTopicsLoaded = true;
     } catch (e) {
       listEl.innerHTML = `<div class="placeholder-text error-text">Error: ${e.message}</div>`;
+    }
+  }
+
+  async function loadPartitionedTopicStats(group) {
+    const serviceUrl = serviceUrlEl.value.trim();
+    const token = tokenEl.value.trim();
+    if (!serviceUrl) return;
+
+    document.getElementById('management-placeholder').style.display = 'none';
+    document.getElementById('management-content').style.display = 'block';
+    document.getElementById('mgmt-topic-name').textContent = group.baseName;
+
+    const params = new URLSearchParams({ serviceUrl, topic: group.partitions[0].fullName });
+    if (token) params.append('token', token);
+
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/topic-stats?${params}`);
+      const data = await res.json();
+      if (!res.ok) {
+        if (data.authFailed || res.status === 401 || res.status === 403) {
+          showAuthError(data.error || 'Token lacks read permissions for topic stats.');
+        }
+        return;
+      }
+      renderTopicStats(data);
+      renderPartitionSummary(group);
+      startAutoRefresh();
+    } catch (e) {
+      showAuthError(`Failed to load stats: ${e.message}`);
     }
   }
 
@@ -793,6 +950,8 @@
         return;
       }
       renderTopicStats(data);
+      hidePartitionSummary();
+      startAutoRefresh();
     } catch (e) {
       document.getElementById('management-placeholder').style.display = 'flex';
       document.getElementById('management-content').style.display = 'none';
@@ -854,6 +1013,105 @@
       ptbody.appendChild(tr);
     });
     if (producers.length === 0) ptbody.innerHTML = '<tr><td colspan="4" class="td-empty">No active producers</td></tr>';
+  }
+
+  // ─── Partition Summary ───────────────────────────────────────────────────
+  function renderPartitionSummary(group) {
+    let wrap = document.getElementById('partition-summary');
+    if (!wrap) {
+      wrap = document.createElement('div');
+      wrap.id = 'partition-summary';
+      wrap.className = 'mgmt-section';
+      const content = document.getElementById('management-content');
+      const firstSection = content.querySelector('.mgmt-section');
+      content.insertBefore(wrap, firstSection);
+    }
+    wrap.style.display = 'block';
+    wrap.innerHTML = `
+      <div class="mgmt-section-title">Partitions</div>
+      <div class="partition-summary-cards">
+        ${group.partitions.map(p => `
+          <div class="partition-card" data-topic="${p.fullName}">
+            <div class="partition-card-index">partition-${p.index}</div>
+            <div class="partition-card-loading">loading\u2026</div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+
+    const serviceUrl = serviceUrlEl.value.trim();
+    const token = tokenEl.value.trim();
+    group.partitions.forEach(p => {
+      loadPartitionCardStats(p.fullName, serviceUrl, token);
+    });
+
+    wrap.querySelectorAll('.partition-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const topicFull = card.dataset.topic;
+        selectedTopic = topicFull;
+        loadTopicStats(topicFull);
+      });
+    });
+  }
+
+  async function loadPartitionCardStats(topicFull, serviceUrl, token) {
+    const card = document.querySelector(`.partition-card[data-topic="${topicFull}"]`);
+    if (!card) return;
+    const params = new URLSearchParams({ serviceUrl, topic: topicFull });
+    if (token) params.append('token', token);
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/topic-stats?${params}`);
+      const data = await res.json();
+      if (!res.ok) {
+        card.querySelector('.partition-card-loading').textContent = 'error';
+        return;
+      }
+      card.querySelector('.partition-card-loading').innerHTML = `
+        <span class="pc-stat">\u2191 ${fmtRate(data.msgRateIn)}/s</span>
+        <span class="pc-stat">\u2193 ${fmtRate(data.msgRateOut)}/s</span>
+        <span class="pc-stat">${fmtBytes(data.storageSize)}</span>
+      `;
+    } catch {
+      card.querySelector('.partition-card-loading').textContent = 'error';
+    }
+  }
+
+  function hidePartitionSummary() {
+    const wrap = document.getElementById('partition-summary');
+    if (wrap) wrap.style.display = 'none';
+  }
+
+  // ─── Auto-refresh ──────────────────────────────────────────────────────
+  function startAutoRefresh() {
+    stopAutoRefresh();
+    if (!managementAutoRefreshEnabled || !selectedTopic) return;
+    updateAutoRefreshCountdown();
+    managementAutoRefreshTimer = setInterval(() => {
+      if (selectedTopic && activeTab === 'management') {
+        refreshCurrentTopic();
+      }
+    }, managementAutoRefreshInterval * 1000);
+  }
+
+  function stopAutoRefresh() {
+    if (managementAutoRefreshTimer) {
+      clearInterval(managementAutoRefreshTimer);
+      managementAutoRefreshTimer = null;
+    }
+  }
+
+  function refreshCurrentTopic() {
+    if (!selectedTopic) return;
+    loadTopicStats(selectedTopic);
+  }
+
+  function updateAutoRefreshCountdown() {
+    const badge = document.getElementById('autorefresh-badge');
+    if (badge) {
+      badge.textContent = managementAutoRefreshEnabled
+        ? `Auto-refresh: ${managementAutoRefreshInterval}s`
+        : 'Auto-refresh: off';
+    }
   }
 
   // ─── Protobuf Schema ─────────────────────────────────────────────────────
