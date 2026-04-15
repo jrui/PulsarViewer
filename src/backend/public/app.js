@@ -474,26 +474,155 @@
     }
   }
 
-  function renderMessages(msgs) {
-    const fragment = document.createDocumentFragment();
-    msgs.forEach(msg => {
-      const raw = typeof msg === 'string' ? msg : JSON.stringify(msg, null, 2);
-      const container = document.createElement('div');
-      container.className = 'msg msg-message';
-      const meta = document.createElement('div');
-      meta.className = 'msg-meta';
-      meta.innerHTML = `<span class="msg-icon msg-icon-message">▶</span>
-        <span class="msg-time">${msg.publishTime ? new Date(msg.publishTime).toLocaleTimeString() : ''}</span>
-        ${msg.key ? `<span class="msg-key">${msg.key}</span>` : ''}`;
-      const pre = document.createElement('pre');
-      pre.className = 'msg-payload';
-      pre.innerHTML = syntaxHighlight(msg.payload || raw);
-      container.appendChild(meta);
-      container.appendChild(pre);
-      fragment.appendChild(container);
+  function fmtTimestamp(ms) {
+    if (!ms) return null;
+    const d = new Date(ms);
+    return d.toLocaleString() + '.' + String(d.getMilliseconds()).padStart(3, '0');
+  }
+
+  function buildDetailPanel(msg) {
+    const props = msg.properties || {};
+    const propKeys = Object.keys(props);
+
+    const publishFmt = fmtTimestamp(msg.publishTime);
+    const eventFmt = fmtTimestamp(msg.eventTime);
+
+    let html = '';
+
+    html += `<div class="msg-detail-section">
+      <div class="msg-detail-title">Identity</div>
+      <div class="msg-detail-row"><span class="msg-detail-label">Message ID</span><span class="msg-detail-value">${msg.id || '<span class="msg-detail-value-empty">—</span>'}</span></div>
+      <div class="msg-detail-row"><span class="msg-detail-label">Key</span><span class="msg-detail-value">${msg.key || '<span class="msg-detail-value-empty">none</span>'}</span></div>
+    </div>`;
+
+    html += `<div class="msg-detail-section">
+      <div class="msg-detail-title">Timestamps</div>
+      <div class="msg-detail-row"><span class="msg-detail-label">Published</span><span class="msg-detail-value">${publishFmt || '<span class="msg-detail-value-empty">—</span>'}</span></div>
+      <div class="msg-detail-row"><span class="msg-detail-label">Event Time</span><span class="msg-detail-value">${eventFmt || '<span class="msg-detail-value-empty">not set</span>'}</span></div>
+    </div>`;
+
+    html += `<div class="msg-detail-section">
+      <div class="msg-detail-title">Properties (${propKeys.length})</div>`;
+    if (propKeys.length === 0) {
+      html += `<div class="msg-detail-row"><span class="msg-detail-value-empty">No properties</span></div>`;
+    } else {
+      propKeys.forEach(k => {
+        html += `<div class="msg-detail-row">
+          <span class="msg-prop-badge"><span class="msg-prop-key">${escHtml(k)}</span></span>
+          <span class="msg-detail-value">${escHtml(props[k])}</span>
+        </div>`;
+      });
+    }
+    html += `</div>`;
+
+    return html;
+  }
+
+  function escHtml(s) {
+    if (!s) return '';
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function buildMessageEl(msg) {
+    const container = document.createElement('div');
+    container.className = 'msg msg-message msg-clickable';
+    container.dataset.msgId = msg.id || '';
+
+    const meta = document.createElement('div');
+    meta.className = 'msg-meta';
+    meta.innerHTML = `<span class="msg-icon msg-icon-message">▶</span>
+      <span class="msg-time">${msg.publishTime ? new Date(msg.publishTime).toLocaleTimeString() : ''}</span>
+      ${msg.key ? `<span class="msg-key">${msg.key}</span>` : ''}
+      <span class="msg-hint">click to inspect</span>`;
+
+    const body = document.createElement('div');
+    body.className = 'msg-body';
+
+    const payloadCol = document.createElement('div');
+    payloadCol.className = 'msg-payload-col';
+    const pre = document.createElement('pre');
+    pre.className = 'msg-payload';
+    pre.innerHTML = syntaxHighlight(msg.payload || JSON.stringify(msg, null, 2));
+    payloadCol.appendChild(pre);
+
+    const detailCol = document.createElement('div');
+    detailCol.className = 'msg-detail-col';
+    detailCol.innerHTML = buildDetailPanel(msg);
+
+    body.appendChild(payloadCol);
+    body.appendChild(detailCol);
+
+    container.appendChild(meta);
+    container.appendChild(body);
+
+    container.addEventListener('click', () => {
+      container.classList.toggle('msg-expanded');
     });
-    messagesEl.innerHTML = '';
-    messagesEl.appendChild(fragment);
+
+    return container;
+  }
+
+  function renderMessages(msgs) {
+    const existingEls = messagesEl.querySelectorAll('.msg-message[data-msg-id]');
+    const existingById = new Map();
+    existingEls.forEach(el => {
+      const id = el.dataset.msgId;
+      if (id) existingById.set(id, el);
+    });
+
+    const expandedIds = new Set();
+    existingEls.forEach(el => {
+      if (el.classList.contains('msg-expanded') && el.dataset.msgId) {
+        expandedIds.add(el.dataset.msgId);
+      }
+    });
+
+    const incomingIds = new Set(msgs.map(m => m.id).filter(Boolean));
+    const needsFullRebuild = existingById.size === 0
+      || msgs.length === 0
+      || (incomingIds.size > 0 && [...existingById.keys()].every(id => !incomingIds.has(id)));
+
+    if (needsFullRebuild) {
+      const fragment = document.createDocumentFragment();
+      msgs.forEach(msg => {
+        const el = buildMessageEl(msg);
+        if (msg.id && expandedIds.has(msg.id)) el.classList.add('msg-expanded');
+        fragment.appendChild(el);
+      });
+      messagesEl.innerHTML = '';
+      messagesEl.appendChild(fragment);
+      return;
+    }
+
+    const newIds = new Set();
+    msgs.forEach(msg => { if (msg.id) newIds.add(msg.id); });
+
+    // Remove messages no longer in the list
+    existingById.forEach((el, id) => {
+      if (!newIds.has(id)) el.remove();
+    });
+
+    // Append new messages that don't exist yet, preserve existing ones
+    let lastEl = null;
+    msgs.forEach(msg => {
+      const id = msg.id || '';
+      const existing = id ? existingById.get(id) : null;
+      if (existing) {
+        if (lastEl && lastEl.nextSibling !== existing) {
+          messagesEl.insertBefore(existing, lastEl.nextSibling);
+        }
+        lastEl = existing;
+      } else {
+        const el = buildMessageEl(msg);
+        if (id && expandedIds.has(id)) el.classList.add('msg-expanded');
+        if (lastEl) {
+          lastEl.insertAdjacentElement('afterend', el);
+        } else {
+          messagesEl.prepend(el);
+        }
+        lastEl = el;
+      }
+    });
   }
 
   function updateCounterDisplay() {
