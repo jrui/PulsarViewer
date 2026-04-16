@@ -1250,6 +1250,7 @@ func (h *HTTPHandler) handleAdminNamespaces(w http.ResponseWriter, r *http.Reque
 func (h *HTTPHandler) handleAdminCheckPermissions(w http.ResponseWriter, r *http.Request) {
 	serviceURL := r.URL.Query().Get("serviceUrl")
 	namespace := r.URL.Query().Get("namespace")
+	topic := r.URL.Query().Get("topic")
 	token := r.URL.Query().Get("token")
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1276,9 +1277,9 @@ func (h *HTTPHandler) handleAdminCheckPermissions(w http.ResponseWriter, r *http
 		Status   int    `json:"status"`
 		OK       bool   `json:"ok"`
 		Error    string `json:"error,omitempty"`
+		Category string `json:"category"`
 	}
 
-	// Determine which base URL actually responds
 	resolvedBase := bases[0]
 	for _, b := range bases {
 		_, s, e := adminRequest([]string{b}, token, "/admin/v2/clusters")
@@ -1288,34 +1289,82 @@ func (h *HTTPHandler) handleAdminCheckPermissions(w http.ResponseWriter, r *http
 		}
 	}
 
-	probes := []struct {
-		label string
-		path  string
-	}{
-		{"List clusters", "/admin/v2/clusters"},
-		{"List tenants", "/admin/v2/tenants"},
-		{"List namespaces (public)", "/admin/v2/namespaces/public"},
-		{"List persistent topics (" + namespace + ")", "/admin/v2/persistent/" + namespace},
-		{"List non-persistent topics (" + namespace + ")", "/admin/v2/non-persistent/" + namespace},
+	type probe struct {
+		label    string
+		path     string
+		method   string
+		category string
+		okCodes  []int
+	}
+
+	probes := []probe{
+		{"List clusters", "/admin/v2/clusters", http.MethodGet, "admin", nil},
+		{"List tenants", "/admin/v2/tenants", http.MethodGet, "admin", nil},
+		{"List namespaces (public)", "/admin/v2/namespaces/public", http.MethodGet, "admin", nil},
+		{"List persistent topics (" + namespace + ")", "/admin/v2/persistent/" + namespace, http.MethodGet, "admin", nil},
+		{"List non-persistent topics (" + namespace + ")", "/admin/v2/non-persistent/" + namespace, http.MethodGet, "admin", nil},
+	}
+
+	if topic != "" {
+		statsPath := topicToAdminPath(topic, "stats")
+		subsPath := topicToAdminPath(topic, "subscriptions")
+		probes = append(probes,
+			probe{"Topic stats", statsPath, http.MethodGet, "topic", nil},
+			probe{"List subscriptions", subsPath, http.MethodGet, "topic", nil},
+		)
+
+		// Probe subscription read access using first available subscription.
+		// Only safe read-only (GET) endpoints are probed — skip/clear are
+		// write operations and cannot be used as probes without side effects.
+		body, status, _ := adminRequestMethod([]string{resolvedBase}, token, http.MethodGet, statsPath, nil)
+		if status == http.StatusOK {
+			var stats struct {
+				Subscriptions map[string]interface{} `json:"subscriptions"`
+			}
+			if json.Unmarshal(body, &stats) == nil && len(stats.Subscriptions) > 0 {
+				var testSub string
+				for k := range stats.Subscriptions {
+					testSub = k
+					break
+				}
+				sub := url.PathEscape(testSub)
+				probes = append(probes,
+					probe{"Peek messages (" + testSub + ")", topicToAdminPath(topic, "subscription/"+sub+"/position/1"), http.MethodGet, "subscription", []int{http.StatusOK, http.StatusNotFound}},
+				)
+			}
+		}
 	}
 
 	results := make([]checkResult, 0, len(probes))
 	for _, p := range probes {
 		fullURL := resolvedBase + p.path
-		body, status, reqErr := adminRequest([]string{resolvedBase}, token, p.path)
+		body, status, reqErr := adminRequestMethod([]string{resolvedBase}, token, p.method, p.path, nil)
+		isOK := status == http.StatusOK
+		if len(p.okCodes) > 0 {
+			isOK = false
+			for _, c := range p.okCodes {
+				if status == c {
+					isOK = true
+					break
+				}
+			}
+		}
 		res := checkResult{
 			Endpoint: p.label,
 			URL:      fullURL,
 			Status:   status,
-			OK:       status == http.StatusOK,
+			OK:       isOK,
+			Category: p.category,
 		}
 		if reqErr != nil {
 			res.Error = reqErr.Error()
-		} else if status != http.StatusOK {
-			// Include a snippet of the response body so the caller can see the reason
+		} else if !isOK {
 			snippet := strings.TrimSpace(string(body))
 			if len(snippet) > 200 {
 				snippet = snippet[:200] + "…"
+			}
+			if snippet != "" && snippet[0] != '{' && snippet[0] != '[' {
+				snippet = ""
 			}
 			res.Error = snippet
 		}
@@ -1338,6 +1387,23 @@ func topicToAdminPath(topic, suffix string) string {
 	topic = strings.TrimPrefix(topic, "persistent://")
 	topic = strings.TrimPrefix(topic, "non-persistent://")
 	return fmt.Sprintf("/admin/v2/%s/%s/%s", scheme, topic, suffix)
+}
+
+// writeJSONOrError writes the body as-is if it looks like JSON, otherwise
+// wraps the text in a JSON error envelope. Prevents HTML error pages from
+// reaching the frontend as raw non-JSON responses.
+func writeJSONOrError(w http.ResponseWriter, body []byte, status int) {
+	trimmed := strings.TrimSpace(string(body))
+	if len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[') {
+		w.Write(body)
+	} else {
+		if len(trimmed) > 200 {
+			trimmed = trimmed[:200] + "…"
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": fmt.Sprintf("Pulsar admin returned HTTP %d: %s", status, trimmed),
+		})
+	}
 }
 
 // extractPayloadFromBatch strips the Pulsar single-message metadata prefix
@@ -1525,7 +1591,7 @@ func (h *HTTPHandler) handleAdminSubSkip(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	w.WriteHeader(status)
-	w.Write(body)
+	writeJSONOrError(w, body, status)
 }
 
 func (h *HTTPHandler) handleAdminSubClearBacklog(w http.ResponseWriter, r *http.Request) {
@@ -1561,7 +1627,7 @@ func (h *HTTPHandler) handleAdminSubClearBacklog(w http.ResponseWriter, r *http.
 		return
 	}
 
-	topicPath := topicToAdminPath(req.Topic, "subscription/"+url.PathEscape(req.Subscription)+"/skip/all")
+	topicPath := topicToAdminPath(req.Topic, "subscription/"+url.PathEscape(req.Subscription)+"/skip_all")
 	body, status, err := adminRequestMethod(bases, req.Token, http.MethodPost, topicPath, nil)
 	if err != nil {
 		w.WriteHeader(http.StatusBadGateway)
@@ -1578,7 +1644,7 @@ func (h *HTTPHandler) handleAdminSubClearBacklog(w http.ResponseWriter, r *http.
 		return
 	}
 	w.WriteHeader(status)
-	w.Write(body)
+	writeJSONOrError(w, body, status)
 }
 
 func (h *HTTPHandler) handleAdminSubUnsubscribe(w http.ResponseWriter, r *http.Request) {
@@ -1631,7 +1697,7 @@ func (h *HTTPHandler) handleAdminSubUnsubscribe(w http.ResponseWriter, r *http.R
 		return
 	}
 	w.WriteHeader(status)
-	w.Write(body)
+	writeJSONOrError(w, body, status)
 }
 
 // ─── Protobuf API handlers ─────────────────────────────────────────────────

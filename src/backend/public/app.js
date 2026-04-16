@@ -1050,6 +1050,7 @@
     if (!serviceUrl) { showAuthError('Set a Service URL first.'); return; }
 
     const namespace = document.getElementById('namespaceInput').value.trim() || 'public/default';
+    const topic = topicEl.value.trim();
     const token = tokenEl.value.trim();
     const modal = document.getElementById('permsModal');
     const bodyEl = document.getElementById('permsModalBody');
@@ -1061,6 +1062,7 @@
 
     try {
       const params = new URLSearchParams({ serviceUrl, namespace });
+      if (topic) params.append('topic', topic);
       if (token) params.append('token', token);
       const res = await fetch(`${API_BASE}/api/admin/check-permissions?${params}`);
       const data = await res.json();
@@ -1072,26 +1074,44 @@
 
       baseEl.textContent = `Admin URL: ${data.resolvedAdminBase}`;
 
-      bodyEl.innerHTML = '';
+      const categoryLabels = { admin: 'Admin', topic: 'Topic', subscription: 'Subscription Actions' };
+      const grouped = {};
       (data.checks || []).forEach(c => {
-        const row = document.createElement('div');
-        row.className = `perms-row ${c.ok ? 'perms-ok' : 'perms-fail'}`;
-
-        const statusLabel = c.status === 0 ? 'unreachable'
-          : c.status === 401 ? '401 Unauthorized'
-          : c.status === 403 ? '403 Forbidden'
-          : c.status === 404 ? '404 Not Found'
-          : c.ok ? `${c.status} OK`
-          : `${c.status}`;
-
-        row.innerHTML = `
-          <span class="perms-icon">${c.ok ? '✓' : '✕'}</span>
-          <span class="perms-endpoint">${c.endpoint}</span>
-          <span class="perms-badge ${c.ok ? 'perms-badge-ok' : 'perms-badge-fail'}">${statusLabel}</span>
-          ${c.error && !c.ok ? `<span class="perms-error">${c.error}</span>` : ''}
-        `;
-        bodyEl.appendChild(row);
+        const cat = c.category || 'admin';
+        if (!grouped[cat]) grouped[cat] = [];
+        grouped[cat].push(c);
       });
+
+      bodyEl.innerHTML = '';
+      for (const cat of ['admin', 'topic', 'subscription']) {
+        const items = grouped[cat];
+        if (!items || items.length === 0) continue;
+
+        const heading = document.createElement('div');
+        heading.className = 'perms-category';
+        heading.textContent = categoryLabels[cat] || cat;
+        bodyEl.appendChild(heading);
+
+        items.forEach(c => {
+          const row = document.createElement('div');
+          row.className = `perms-row ${c.ok ? 'perms-ok' : 'perms-fail'}`;
+
+          const statusLabel = c.status === 0 ? 'unreachable'
+            : c.status === 401 ? '401 Unauthorized'
+            : c.status === 403 ? '403 Forbidden'
+            : c.status === 404 ? '404 Not Found'
+            : c.ok ? `${c.status} OK`
+            : `${c.status}`;
+
+          row.innerHTML = `
+            <span class="perms-icon">${c.ok ? '✓' : '✕'}</span>
+            <span class="perms-endpoint">${c.endpoint}</span>
+            <span class="perms-badge ${c.ok ? 'perms-badge-ok' : 'perms-badge-fail'}">${statusLabel}</span>
+            ${c.error && !c.ok ? `<span class="perms-error">${c.error}</span>` : ''}
+          `;
+          bodyEl.appendChild(row);
+        });
+      }
     } catch (e) {
       bodyEl.innerHTML = `<div class="perms-row perms-fail"><span class="perms-status">Error</span><span>${e.message}</span></div>`;
     }
