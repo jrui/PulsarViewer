@@ -200,8 +200,14 @@
                 <input type="text" id="sendKey" placeholder="message key" />
               </div>
               <div class="form-row">
-                <label>Properties <span class="optional">(JSON)</span></label>
-                <textarea id="sendProps" rows="2" placeholder='{"key":"value"}'></textarea>
+                <label>
+                  Properties <span class="optional">(optional)</span>
+                  <button type="button" id="addPropBtn" class="btn-sm btn-ghost prop-add-btn" title="Add property">+ Add</button>
+                </label>
+                <div id="propsEditor" class="props-editor">
+                  <div class="props-empty">No properties — click + Add</div>
+                </div>
+                <input type="hidden" id="sendProps" />
               </div>
               <div class="form-row">
                 <label>

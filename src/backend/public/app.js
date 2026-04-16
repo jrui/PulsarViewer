@@ -699,6 +699,54 @@
     }
   });
 
+  // ─── Properties Editor ──────────────────────────────────────────────────
+  const propsEditorEl = document.getElementById('propsEditor');
+  const addPropBtn = document.getElementById('addPropBtn');
+
+  function addPropRow(key, value) {
+    const empty = propsEditorEl.querySelector('.props-empty');
+    if (empty) empty.remove();
+
+    const row = document.createElement('div');
+    row.className = 'prop-row';
+    row.innerHTML = `
+      <input type="text" class="prop-key" placeholder="key" value="${escHtml(key || '')}" />
+      <input type="text" class="prop-val" placeholder="value" value="${escHtml(value || '')}" />
+      <button type="button" class="prop-remove-btn" title="Remove">&times;</button>
+    `;
+    row.querySelector('.prop-remove-btn').addEventListener('click', () => {
+      row.remove();
+      if (propsEditorEl.children.length === 0) {
+        propsEditorEl.innerHTML = '<div class="props-empty">No properties — click + Add</div>';
+      }
+    });
+    propsEditorEl.appendChild(row);
+    row.querySelector('.prop-key').focus();
+  }
+
+  function getPropertiesFromEditor() {
+    const rows = propsEditorEl.querySelectorAll('.prop-row');
+    if (rows.length === 0) return undefined;
+    const props = {};
+    rows.forEach(row => {
+      const k = row.querySelector('.prop-key').value.trim();
+      const v = row.querySelector('.prop-val').value;
+      if (k) props[k] = v;
+    });
+    return Object.keys(props).length > 0 ? props : undefined;
+  }
+
+  function setPropertiesInEditor(propsObj) {
+    propsEditorEl.innerHTML = '';
+    if (!propsObj || typeof propsObj !== 'object' || Object.keys(propsObj).length === 0) {
+      propsEditorEl.innerHTML = '<div class="props-empty">No properties — click + Add</div>';
+      return;
+    }
+    Object.entries(propsObj).forEach(([k, v]) => addPropRow(k, v));
+  }
+
+  addPropBtn.addEventListener('click', () => addPropRow('', ''));
+
   // ─── Producer (Send) ──────────────────────────────────────────────────────
   document.getElementById('send-form').addEventListener('submit', async e => {
     e.preventDefault();
@@ -710,12 +758,7 @@
     const token      = tokenEl.value.trim();
     const payload    = document.getElementById('sendPayload').value;
     const key        = document.getElementById('sendKey').value.trim();
-    const propsRaw   = document.getElementById('sendProps').value.trim();
-    let properties;
-    if (propsRaw) {
-      try { properties = JSON.parse(propsRaw); }
-      catch { addProducerMessage('error', 'Properties JSON is invalid'); sendBtn.disabled = false; return; }
-    }
+    const properties = getPropertiesFromEditor();
 
     const useProtobuf = protoActive && sendAsProtobufEl.checked;
 
@@ -1463,9 +1506,15 @@
     const tmpl = templates[name];
     if (!tmpl) return;
     document.getElementById('sendKey').value = tmpl.key || '';
-    document.getElementById('sendProps').value = tmpl.properties || '';
     document.getElementById('sendPayload').value = tmpl.payload || '';
     templateNameEl.value = name;
+
+    let propsObj = tmpl.properties;
+    if (typeof propsObj === 'string' && propsObj.trim()) {
+      try { propsObj = JSON.parse(propsObj); } catch { propsObj = null; }
+    }
+    setPropertiesInEditor(propsObj || null);
+
     addProducerMessage('info', `Loaded template: ${name}`);
   }
 
@@ -1484,7 +1533,7 @@
     const templates = loadTemplates();
     templates[name] = {
       key: document.getElementById('sendKey').value.trim(),
-      properties: document.getElementById('sendProps').value.trim(),
+      properties: getPropertiesFromEditor() || {},
       payload: document.getElementById('sendPayload').value,
     };
     saveTemplates(templates);

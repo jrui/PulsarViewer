@@ -1533,6 +1533,67 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   opacity: 1;
 }
 
+/* ─── Properties Key-Value Editor ─────────────────────────────────────────── */
+.prop-add-btn {
+  float: right;
+  margin-top: -2px;
+}
+
+.props-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.props-empty {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 6px 8px;
+  background: var(--bg-input);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  text-align: center;
+}
+
+.prop-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  animation: msgIn 0.12s ease;
+}
+
+.prop-row input {
+  flex: 1;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 4px 6px;
+  outline: none;
+  transition: border-color 150ms;
+  min-width: 0;
+}
+.prop-row input:focus { border-color: var(--accent); }
+.prop-row input.prop-key { flex: 0.4; }
+.prop-row input.prop-val { flex: 0.6; }
+
+.prop-remove-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  transition: color 100ms, background 100ms;
+}
+.prop-remove-btn:hover { color: var(--error); background: rgba(224, 85, 85, 0.1); }
+
 /* ─── Scrollbars (global) ─────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
