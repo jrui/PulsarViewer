@@ -130,6 +130,12 @@ func NewHTTPHandler(pulsarClient *pulsar.ClientManager, messageStore *store.Mess
 	mux.HandleFunc("/api/admin/namespaces", handler.handleAdminNamespaces)
 	mux.HandleFunc("/api/admin/check-permissions", handler.handleAdminCheckPermissions)
 
+	// Subscription action endpoints
+	mux.HandleFunc("/api/admin/subscription/peek", handler.handleAdminSubPeek)
+	mux.HandleFunc("/api/admin/subscription/skip", handler.handleAdminSubSkip)
+	mux.HandleFunc("/api/admin/subscription/clear-backlog", handler.handleAdminSubClearBacklog)
+	mux.HandleFunc("/api/admin/subscription/unsubscribe", handler.handleAdminSubUnsubscribe)
+
 	// Protobuf schema endpoints
 	mux.HandleFunc("/api/proto/register", handler.handleProtoRegister)
 	mux.HandleFunc("/api/proto/decode", handler.handleProtoDecode)
@@ -294,7 +300,9 @@ func (h *HTTPHandler) handleSendMessage(w http.ResponseWriter, r *http.Request) 
 
 	client, err := h.pulsarClient.GetOrCreateClient(req.ServiceURL, req.Token)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
 		return
 	}
 
@@ -305,7 +313,9 @@ func (h *HTTPHandler) handleSendMessage(w http.ResponseWriter, r *http.Request) 
 		BatchingMaxPublishDelay: 1 * time.Millisecond,
 	})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
 		return
 	}
 	defer producer.Close()
@@ -320,7 +330,9 @@ func (h *HTTPHandler) handleSendMessage(w http.ResponseWriter, r *http.Request) 
 
 	msgID, err := producer.Send(context.Background(), prodMsg)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
 		return
 	}
 
@@ -997,10 +1009,14 @@ func adminHTTPBases(serviceURL string) ([]string, error) {
 // A response is considered "successful" for routing purposes even if the HTTP status
 // is 4xx (auth errors etc.) — we only retry on connection/network errors.
 func adminRequest(bases []string, token, path string) ([]byte, int, error) {
+	return adminRequestMethod(bases, token, http.MethodGet, path, nil)
+}
+
+func adminRequestMethod(bases []string, token, method, path string, body io.Reader) ([]byte, int, error) {
 	httpClient := &http.Client{Timeout: 10 * time.Second}
 	var lastErr error
 	for _, base := range bases {
-		req, err := http.NewRequest(http.MethodGet, base+path, nil)
+		req, err := http.NewRequest(method, base+path, body)
 		if err != nil {
 			lastErr = err
 			continue
@@ -1011,11 +1027,11 @@ func adminRequest(bases []string, token, path string) ([]byte, int, error) {
 		resp, err := httpClient.Do(req)
 		if err != nil {
 			lastErr = err
-			continue // try next base
+			continue
 		}
-		body, err := io.ReadAll(resp.Body)
+		respBody, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		return body, resp.StatusCode, err
+		return respBody, resp.StatusCode, err
 	}
 	return nil, 0, fmt.Errorf("admin API unreachable (tried %v): %w", bases, lastErr)
 }
@@ -1322,6 +1338,217 @@ func topicToAdminPath(topic, suffix string) string {
 	topic = strings.TrimPrefix(topic, "persistent://")
 	topic = strings.TrimPrefix(topic, "non-persistent://")
 	return fmt.Sprintf("/admin/v2/%s/%s/%s", scheme, topic, suffix)
+}
+
+// ─── Subscription action handlers ──────────────────────────────────────────
+
+func (h *HTTPHandler) handleAdminSubPeek(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	serviceURL := r.URL.Query().Get("serviceUrl")
+	topic := r.URL.Query().Get("topic")
+	subscription := r.URL.Query().Get("subscription")
+	token := r.URL.Query().Get("token")
+	n := r.URL.Query().Get("n")
+	if n == "" {
+		n = "1"
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if serviceURL == "" || topic == "" || subscription == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "serviceUrl, topic, and subscription are required"})
+		return
+	}
+
+	bases, err := adminHTTPBases(serviceURL)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
+		return
+	}
+
+	topicPath := topicToAdminPath(topic, "subscription/"+url.PathEscape(subscription)+"/position/"+n)
+	body, status, err := adminRequest(bases, token, topicPath)
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Admin API unreachable: " + err.Error()})
+		return
+	}
+	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+		w.WriteHeader(status)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Unauthorized", "authFailed": true})
+		return
+	}
+	w.WriteHeader(status)
+	w.Write(body)
+}
+
+func (h *HTTPHandler) handleAdminSubSkip(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	var req struct {
+		ServiceURL   string `json:"serviceUrl"`
+		Topic        string `json:"topic"`
+		Subscription string `json:"subscription"`
+		Token        string `json:"token"`
+		NumMessages  int    `json:"numMessages"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Invalid request"})
+		return
+	}
+
+	if req.ServiceURL == "" || req.Topic == "" || req.Subscription == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "serviceUrl, topic, and subscription are required"})
+		return
+	}
+	if req.NumMessages <= 0 {
+		req.NumMessages = 1
+	}
+
+	bases, err := adminHTTPBases(req.ServiceURL)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
+		return
+	}
+
+	topicPath := topicToAdminPath(req.Topic, "subscription/"+url.PathEscape(req.Subscription)+"/skip/"+strconv.Itoa(req.NumMessages))
+	body, status, err := adminRequestMethod(bases, req.Token, http.MethodPost, topicPath, nil)
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Admin API unreachable: " + err.Error()})
+		return
+	}
+	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+		w.WriteHeader(status)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Unauthorized", "authFailed": true})
+		return
+	}
+	if status == http.StatusNoContent || status == http.StatusOK {
+		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+		return
+	}
+	w.WriteHeader(status)
+	w.Write(body)
+}
+
+func (h *HTTPHandler) handleAdminSubClearBacklog(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	var req struct {
+		ServiceURL   string `json:"serviceUrl"`
+		Topic        string `json:"topic"`
+		Subscription string `json:"subscription"`
+		Token        string `json:"token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Invalid request"})
+		return
+	}
+
+	if req.ServiceURL == "" || req.Topic == "" || req.Subscription == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "serviceUrl, topic, and subscription are required"})
+		return
+	}
+
+	bases, err := adminHTTPBases(req.ServiceURL)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
+		return
+	}
+
+	topicPath := topicToAdminPath(req.Topic, "subscription/"+url.PathEscape(req.Subscription)+"/skip/all")
+	body, status, err := adminRequestMethod(bases, req.Token, http.MethodPost, topicPath, nil)
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Admin API unreachable: " + err.Error()})
+		return
+	}
+	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+		w.WriteHeader(status)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Unauthorized", "authFailed": true})
+		return
+	}
+	if status == http.StatusNoContent || status == http.StatusOK {
+		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+		return
+	}
+	w.WriteHeader(status)
+	w.Write(body)
+}
+
+func (h *HTTPHandler) handleAdminSubUnsubscribe(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	var req struct {
+		ServiceURL   string `json:"serviceUrl"`
+		Topic        string `json:"topic"`
+		Subscription string `json:"subscription"`
+		Token        string `json:"token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Invalid request"})
+		return
+	}
+
+	if req.ServiceURL == "" || req.Topic == "" || req.Subscription == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "serviceUrl, topic, and subscription are required"})
+		return
+	}
+
+	bases, err := adminHTTPBases(req.ServiceURL)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
+		return
+	}
+
+	topicPath := topicToAdminPath(req.Topic, "subscription/"+url.PathEscape(req.Subscription))
+	body, status, err := adminRequestMethod(bases, req.Token, http.MethodDelete, topicPath, nil)
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Admin API unreachable: " + err.Error()})
+		return
+	}
+	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+		w.WriteHeader(status)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Unauthorized", "authFailed": true})
+		return
+	}
+	if status == http.StatusNoContent || status == http.StatusOK {
+		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+		return
+	}
+	w.WriteHeader(status)
+	w.Write(body)
 }
 
 // ─── Protobuf API handlers ─────────────────────────────────────────────────
