@@ -1340,6 +1340,21 @@ func topicToAdminPath(topic, suffix string) string {
 	return fmt.Sprintf("/admin/v2/%s/%s/%s", scheme, topic, suffix)
 }
 
+// extractPayloadFromBatch strips the Pulsar single-message metadata prefix
+// from a peeked message body. The format is: [4-byte big-endian length][metadata bytes][payload].
+// If the body doesn't match this pattern, it's returned as-is.
+func extractPayloadFromBatch(body []byte) string {
+	if len(body) < 4 {
+		return string(body)
+	}
+	metaLen := int(body[0])<<24 | int(body[1])<<16 | int(body[2])<<8 | int(body[3])
+	start := 4 + metaLen
+	if start > len(body) || metaLen < 0 {
+		return string(body)
+	}
+	return string(body[start:])
+}
+
 // ─── Subscription action handlers ──────────────────────────────────────────
 
 func (h *HTTPHandler) handleAdminSubPeek(w http.ResponseWriter, r *http.Request) {
@@ -1352,9 +1367,13 @@ func (h *HTTPHandler) handleAdminSubPeek(w http.ResponseWriter, r *http.Request)
 	topic := r.URL.Query().Get("topic")
 	subscription := r.URL.Query().Get("subscription")
 	token := r.URL.Query().Get("token")
-	n := r.URL.Query().Get("n")
-	if n == "" {
-		n = "1"
+	nStr := r.URL.Query().Get("n")
+	n, _ := strconv.Atoi(nStr)
+	if n <= 0 {
+		n = 1
+	}
+	if n > 100 {
+		n = 100
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1372,20 +1391,84 @@ func (h *HTTPHandler) handleAdminSubPeek(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	topicPath := topicToAdminPath(topic, "subscription/"+url.PathEscape(subscription)+"/position/"+n)
-	body, status, err := adminRequest(bases, token, topicPath)
-	if err != nil {
-		w.WriteHeader(http.StatusBadGateway)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Admin API unreachable: " + err.Error()})
-		return
+	httpClient := &http.Client{Timeout: 10 * time.Second}
+	var resolvedBase string
+	for _, b := range bases {
+		testReq, _ := http.NewRequest(http.MethodGet, b+"/admin/v2/clusters", nil)
+		if token != "" {
+			testReq.Header.Set("Authorization", "Bearer "+token)
+		}
+		if resp, err := httpClient.Do(testReq); err == nil {
+			resp.Body.Close()
+			resolvedBase = b
+			break
+		}
 	}
-	if status == http.StatusUnauthorized || status == http.StatusForbidden {
-		w.WriteHeader(status)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Unauthorized", "authFailed": true})
-		return
+	if resolvedBase == "" {
+		resolvedBase = bases[0]
 	}
-	w.WriteHeader(status)
-	w.Write(body)
+
+	type peekMessage struct {
+		MessageID   string            `json:"messageId,omitempty"`
+		Key         string            `json:"key,omitempty"`
+		PublishTime string            `json:"publishTime,omitempty"`
+		Properties  map[string]string `json:"properties,omitempty"`
+		Payload     string            `json:"payload"`
+		Producer    string            `json:"producer,omitempty"`
+	}
+
+	var messages []peekMessage
+
+	for i := 1; i <= n; i++ {
+		topicPath := topicToAdminPath(topic, "subscription/"+url.PathEscape(subscription)+"/position/"+strconv.Itoa(i))
+		peekURL := resolvedBase + topicPath
+		req, _ := http.NewRequest(http.MethodGet, peekURL, nil)
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			break
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			w.WriteHeader(resp.StatusCode)
+			json.NewEncoder(w).Encode(map[string]interface{}{"error": "Unauthorized", "authFailed": true})
+			return
+		}
+		if resp.StatusCode == http.StatusNotFound {
+			break
+		}
+		if resp.StatusCode != http.StatusOK {
+			break
+		}
+
+		payload := extractPayloadFromBatch(body)
+
+		msg := peekMessage{
+			MessageID:   resp.Header.Get("X-Pulsar-Message-ID"),
+			Key:         resp.Header.Get("X-Pulsar-partition-key"),
+			PublishTime: resp.Header.Get("X-Pulsar-publish-time"),
+			Producer:    resp.Header.Get("X-Pulsar-producer-name"),
+			Payload:     payload,
+		}
+
+		if propHeader := resp.Header.Get("X-Pulsar-PROPERTY"); propHeader != "" {
+			var props map[string]string
+			if err := json.Unmarshal([]byte(propHeader), &props); err == nil {
+				msg.Properties = props
+			}
+		}
+
+		messages = append(messages, msg)
+	}
+
+	if messages == nil {
+		messages = []peekMessage{}
+	}
+	json.NewEncoder(w).Encode(messages)
 }
 
 func (h *HTTPHandler) handleAdminSubSkip(w http.ResponseWriter, r *http.Request) {
