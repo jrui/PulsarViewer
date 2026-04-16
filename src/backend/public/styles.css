@@ -1190,6 +1190,17 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 .perms-list { display: flex; flex-direction: column; gap: 6px; }
 .perms-loading { font-size: 12px; color: var(--text-muted); padding: 12px 0; }
+.perms-category {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-muted);
+  margin-top: 10px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--border);
+}
+.perms-category:first-child { margin-top: 0; }
 
 .perms-row {
   display: grid;
@@ -1532,6 +1543,169 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .template-item:hover .template-delete-btn {
   opacity: 1;
 }
+
+/* ─── Subscription Actions ────────────────────────────────────────────────── */
+.th-actions { text-align: center; min-width: 160px; }
+
+.sub-actions {
+  display: flex;
+  gap: 3px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.sub-action-btn {
+  font-size: 9px !important;
+  padding: 2px 6px !important;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 100ms, color 100ms, border-color 100ms;
+  white-space: nowrap;
+}
+.sub-action-btn:hover { background: var(--bg-hover); color: var(--text-bright); border-color: var(--border-light); }
+.sub-action-btn.sub-action-danger { color: var(--error); }
+.sub-action-btn.sub-action-danger:hover { background: rgba(224, 85, 85, 0.1); border-color: var(--error); }
+
+/* Peek modal */
+.peek-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.peek-count-input { width: 60px; }
+
+.peek-messages {
+  max-height: 400px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.peek-messages::-webkit-scrollbar { width: 6px; }
+.peek-messages::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 3px; }
+
+.peek-msg {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--info);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+}
+.peek-msg-meta {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  display: flex;
+  gap: 10px;
+}
+.peek-msg-props {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+.peek-msg-payload {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-all;
+  padding: 4px 6px;
+  background: rgba(0,0,0,0.2);
+  border-radius: var(--radius-sm);
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.peek-empty {
+  text-align: center;
+  padding: 16px;
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 12px;
+}
+
+.modal-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+.modal-desc strong {
+  color: var(--text-bright);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+/* ─── Properties Key-Value Editor ─────────────────────────────────────────── */
+.prop-add-btn {
+  float: right;
+  margin-top: -2px;
+}
+
+.props-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.props-empty {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 6px 8px;
+  background: var(--bg-input);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  text-align: center;
+}
+
+.prop-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  animation: msgIn 0.12s ease;
+}
+
+.prop-row input {
+  flex: 1;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 4px 6px;
+  outline: none;
+  transition: border-color 150ms;
+  min-width: 0;
+}
+.prop-row input:focus { border-color: var(--accent); }
+.prop-row input.prop-key { flex: 0.4; }
+.prop-row input.prop-val { flex: 0.6; }
+
+.prop-remove-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  transition: color 100ms, background 100ms;
+}
+.prop-remove-btn:hover { color: var(--error); background: rgba(224, 85, 85, 0.1); }
 
 /* ─── Scrollbars (global) ─────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 8px; height: 8px; }

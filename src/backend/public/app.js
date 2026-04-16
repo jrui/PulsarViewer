@@ -137,6 +137,7 @@
     if (connected) {
       deriveNamespaceFromTopic();
       managementTopicsLoaded = false;
+      subActionsAllowed = null;
       loadTopicsInBackground();
     } else {
       stopAutoRefresh();
@@ -699,6 +700,54 @@
     }
   });
 
+  // ─── Properties Editor ──────────────────────────────────────────────────
+  const propsEditorEl = document.getElementById('propsEditor');
+  const addPropBtn = document.getElementById('addPropBtn');
+
+  function addPropRow(key, value) {
+    const empty = propsEditorEl.querySelector('.props-empty');
+    if (empty) empty.remove();
+
+    const row = document.createElement('div');
+    row.className = 'prop-row';
+    row.innerHTML = `
+      <input type="text" class="prop-key" placeholder="key" value="${escHtml(key || '')}" />
+      <input type="text" class="prop-val" placeholder="value" value="${escHtml(value || '')}" />
+      <button type="button" class="prop-remove-btn" title="Remove">&times;</button>
+    `;
+    row.querySelector('.prop-remove-btn').addEventListener('click', () => {
+      row.remove();
+      if (propsEditorEl.children.length === 0) {
+        propsEditorEl.innerHTML = '<div class="props-empty">No properties — click + Add</div>';
+      }
+    });
+    propsEditorEl.appendChild(row);
+    row.querySelector('.prop-key').focus();
+  }
+
+  function getPropertiesFromEditor() {
+    const rows = propsEditorEl.querySelectorAll('.prop-row');
+    if (rows.length === 0) return undefined;
+    const props = {};
+    rows.forEach(row => {
+      const k = row.querySelector('.prop-key').value.trim();
+      const v = row.querySelector('.prop-val').value;
+      if (k) props[k] = v;
+    });
+    return Object.keys(props).length > 0 ? props : undefined;
+  }
+
+  function setPropertiesInEditor(propsObj) {
+    propsEditorEl.innerHTML = '';
+    if (!propsObj || typeof propsObj !== 'object' || Object.keys(propsObj).length === 0) {
+      propsEditorEl.innerHTML = '<div class="props-empty">No properties — click + Add</div>';
+      return;
+    }
+    Object.entries(propsObj).forEach(([k, v]) => addPropRow(k, v));
+  }
+
+  addPropBtn.addEventListener('click', () => addPropRow('', ''));
+
   // ─── Producer (Send) ──────────────────────────────────────────────────────
   document.getElementById('send-form').addEventListener('submit', async e => {
     e.preventDefault();
@@ -710,12 +759,7 @@
     const token      = tokenEl.value.trim();
     const payload    = document.getElementById('sendPayload').value;
     const key        = document.getElementById('sendKey').value.trim();
-    const propsRaw   = document.getElementById('sendProps').value.trim();
-    let properties;
-    if (propsRaw) {
-      try { properties = JSON.parse(propsRaw); }
-      catch { addProducerMessage('error', 'Properties JSON is invalid'); sendBtn.disabled = false; return; }
-    }
+    const properties = getPropertiesFromEditor();
 
     const useProtobuf = protoActive && sendAsProtobufEl.checked;
 
@@ -1006,6 +1050,7 @@
     if (!serviceUrl) { showAuthError('Set a Service URL first.'); return; }
 
     const namespace = document.getElementById('namespaceInput').value.trim() || 'public/default';
+    const topic = topicEl.value.trim();
     const token = tokenEl.value.trim();
     const modal = document.getElementById('permsModal');
     const bodyEl = document.getElementById('permsModalBody');
@@ -1017,6 +1062,7 @@
 
     try {
       const params = new URLSearchParams({ serviceUrl, namespace });
+      if (topic) params.append('topic', topic);
       if (token) params.append('token', token);
       const res = await fetch(`${API_BASE}/api/admin/check-permissions?${params}`);
       const data = await res.json();
@@ -1028,26 +1074,44 @@
 
       baseEl.textContent = `Admin URL: ${data.resolvedAdminBase}`;
 
-      bodyEl.innerHTML = '';
+      const categoryLabels = { admin: 'Admin', topic: 'Topic', subscription: 'Subscription Actions' };
+      const grouped = {};
       (data.checks || []).forEach(c => {
-        const row = document.createElement('div');
-        row.className = `perms-row ${c.ok ? 'perms-ok' : 'perms-fail'}`;
-
-        const statusLabel = c.status === 0 ? 'unreachable'
-          : c.status === 401 ? '401 Unauthorized'
-          : c.status === 403 ? '403 Forbidden'
-          : c.status === 404 ? '404 Not Found'
-          : c.ok ? `${c.status} OK`
-          : `${c.status}`;
-
-        row.innerHTML = `
-          <span class="perms-icon">${c.ok ? '✓' : '✕'}</span>
-          <span class="perms-endpoint">${c.endpoint}</span>
-          <span class="perms-badge ${c.ok ? 'perms-badge-ok' : 'perms-badge-fail'}">${statusLabel}</span>
-          ${c.error && !c.ok ? `<span class="perms-error">${c.error}</span>` : ''}
-        `;
-        bodyEl.appendChild(row);
+        const cat = c.category || 'admin';
+        if (!grouped[cat]) grouped[cat] = [];
+        grouped[cat].push(c);
       });
+
+      bodyEl.innerHTML = '';
+      for (const cat of ['admin', 'topic', 'subscription']) {
+        const items = grouped[cat];
+        if (!items || items.length === 0) continue;
+
+        const heading = document.createElement('div');
+        heading.className = 'perms-category';
+        heading.textContent = categoryLabels[cat] || cat;
+        bodyEl.appendChild(heading);
+
+        items.forEach(c => {
+          const row = document.createElement('div');
+          row.className = `perms-row ${c.ok ? 'perms-ok' : 'perms-fail'}`;
+
+          const statusLabel = c.status === 0 ? 'unreachable'
+            : c.status === 401 ? '401 Unauthorized'
+            : c.status === 403 ? '403 Forbidden'
+            : c.status === 404 ? '404 Not Found'
+            : c.ok ? `${c.status} OK`
+            : `${c.status}`;
+
+          row.innerHTML = `
+            <span class="perms-icon">${c.ok ? '✓' : '✕'}</span>
+            <span class="perms-endpoint">${c.endpoint}</span>
+            <span class="perms-badge ${c.ok ? 'perms-badge-ok' : 'perms-badge-fail'}">${statusLabel}</span>
+            ${c.error && !c.ok ? `<span class="perms-error">${c.error}</span>` : ''}
+          `;
+          bodyEl.appendChild(row);
+        });
+      }
     } catch (e) {
       bodyEl.innerHTML = `<div class="perms-row perms-fail"><span class="perms-status">Error</span><span>${e.message}</span></div>`;
     }
@@ -1061,6 +1125,8 @@
     document.getElementById('management-placeholder').style.display = 'none';
     document.getElementById('management-content').style.display = 'block';
     document.getElementById('mgmt-topic-name').textContent = topic.split('/').pop();
+
+    if (subActionsAllowed === null) probeSubActionPermissions();
 
     const params = new URLSearchParams({ serviceUrl, topic });
     if (token) params.append('token', token);
@@ -1094,7 +1160,25 @@
     if (v >= 1e9) return (v / 1e9).toFixed(2) + ' GB';
     if (v >= 1e6) return (v / 1e6).toFixed(2) + ' MB';
     if (v >= 1e3) return (v / 1e3).toFixed(2) + ' KB';
-    return v + ' B';
+    return v.toFixed(2) + ' B';
+  }
+
+  let subActionsAllowed = null; // null = not probed yet, true/false after probe
+
+  async function probeSubActionPermissions() {
+    if (!selectedTopic) return;
+    const serviceUrl = serviceUrlEl.value.trim();
+    const token = tokenEl.value.trim();
+    try {
+      const subs = await (await fetch(`${API_BASE}/api/admin/topic-stats?` + new URLSearchParams({ serviceUrl, topic: selectedTopic, ...(token ? { token } : {}) }))).json();
+      const subNames = Object.keys(subs.subscriptions || {});
+      if (subNames.length === 0) { subActionsAllowed = true; return; }
+      const testSub = subNames[0];
+      const peekRes = await fetch(`${API_BASE}/api/admin/subscription/peek?` + new URLSearchParams({ serviceUrl, topic: selectedTopic, subscription: testSub, n: '1', ...(token ? { token } : {}) }));
+      subActionsAllowed = peekRes.status !== 401 && peekRes.status !== 403;
+    } catch {
+      subActionsAllowed = true;
+    }
   }
 
   function renderTopicStats(stats) {
@@ -1110,22 +1194,49 @@
     const subKeys = Object.keys(subs);
     document.getElementById('stat-subscriptions').textContent = subKeys.length;
 
-    // Subscriptions table
+    const showActions = subActionsAllowed !== false;
+    document.getElementById('sub-actions-th').style.display = showActions ? '' : 'none';
+
     const tbody = document.getElementById('subscriptions-tbody');
     tbody.innerHTML = '';
+    const colSpan = showActions ? 6 : 5;
     subKeys.forEach(name => {
       const s = subs[name];
       const tr = document.createElement('tr');
+      let actionsHtml = '';
+      if (showActions) {
+        actionsHtml = `<td class="sub-actions">
+          <button class="sub-action-btn" data-action="peek" data-sub="${escHtml(name)}">Peek</button>
+          <button class="sub-action-btn" data-action="skip" data-sub="${escHtml(name)}">Skip</button>
+          <button class="sub-action-btn sub-action-danger" data-action="clear" data-sub="${escHtml(name)}">Clear</button>
+          <button class="sub-action-btn sub-action-danger" data-action="unsub" data-sub="${escHtml(name)}">Delete</button>
+        </td>`;
+      }
       tr.innerHTML = `
         <td class="td-name">${name}</td>
         <td>${s.type || '—'}</td>
         <td>${(s.consumers || []).length}</td>
         <td>${s.msgBacklog != null ? s.msgBacklog.toLocaleString() : '—'}</td>
         <td>${s.msgRateOut != null ? s.msgRateOut.toFixed(2) : '—'}</td>
+        ${actionsHtml}
       `;
       tbody.appendChild(tr);
     });
-    if (subKeys.length === 0) tbody.innerHTML = '<tr><td colspan="5" class="td-empty">No subscriptions</td></tr>';
+    if (subKeys.length === 0) tbody.innerHTML = `<tr><td colspan="${colSpan}" class="td-empty">No subscriptions</td></tr>`;
+
+    if (showActions) {
+      tbody.querySelectorAll('.sub-action-btn').forEach(btn => {
+        btn.addEventListener('click', e => {
+          e.stopPropagation();
+          const action = btn.dataset.action;
+          const sub = btn.dataset.sub;
+          if (action === 'peek') openPeekModal(sub);
+          else if (action === 'skip') openSkipModal(sub);
+          else if (action === 'clear') confirmClearBacklog(sub);
+          else if (action === 'unsub') confirmUnsubscribe(sub);
+        });
+      });
+    }
 
     // Producers table
     const ptbody = document.getElementById('producers-tbody');
@@ -1142,6 +1253,159 @@
       ptbody.appendChild(tr);
     });
     if (producers.length === 0) ptbody.innerHTML = '<tr><td colspan="4" class="td-empty">No active producers</td></tr>';
+  }
+
+  // ─── Subscription Actions ──────────────────────────────────────────────
+  function subActionParams() {
+    return {
+      serviceUrl: serviceUrlEl.value.trim(),
+      topic: selectedTopic,
+      token: tokenEl.value.trim(),
+    };
+  }
+
+  function openPeekModal(sub) {
+    document.getElementById('peekModalSub').textContent = sub;
+    document.getElementById('peekMessages').innerHTML = '<div class="peek-empty">Click Fetch to peek messages</div>';
+    document.getElementById('peekModal').style.display = 'flex';
+    document.getElementById('peekFetchBtn').onclick = () => fetchPeekMessages(sub);
+  }
+
+  async function fetchPeekMessages(sub) {
+    const { serviceUrl, topic, token } = subActionParams();
+    const n = document.getElementById('peekCount').value || '5';
+    const container = document.getElementById('peekMessages');
+    container.innerHTML = '<div class="peek-empty">Loading...</div>';
+
+    try {
+      const params = new URLSearchParams({ serviceUrl, topic, subscription: sub, n });
+      if (token) params.append('token', token);
+      const res = await fetch(`${API_BASE}/api/admin/subscription/peek?${params}`);
+      const data = await res.json();
+      if (!res.ok) {
+        container.innerHTML = `<div class="peek-empty" style="color:var(--error);">${data.error || 'Failed to peek'}</div>`;
+        if (data.authFailed) { subActionsAllowed = false; showAuthError('Token lacks permissions for subscription actions.'); }
+        return;
+      }
+      const messages = Array.isArray(data) ? data : [data];
+      if (messages.length === 0) {
+        container.innerHTML = '<div class="peek-empty">No messages to peek</div>';
+        return;
+      }
+      container.innerHTML = '';
+      messages.forEach((msg, i) => {
+        const el = document.createElement('div');
+        el.className = 'peek-msg';
+        const props = msg.properties || {};
+        const propKeys = Object.keys(props);
+        const propsHtml = propKeys.length > 0
+          ? `<div class="peek-msg-props">${propKeys.map(k => `<span class="msg-prop-badge"><span class="msg-prop-key">${escHtml(k)}</span>=<span>${escHtml(props[k])}</span></span>`).join('')}</div>`
+          : '';
+        const payload = typeof msg.data === 'string' ? msg.data
+          : msg.payload ? msg.payload
+          : JSON.stringify(msg, null, 2);
+        el.innerHTML = `
+          <div class="peek-msg-meta">
+            <span>#${i + 1}</span>
+            ${msg.messageId ? `<span>ID: ${msg.messageId}</span>` : ''}
+            ${msg.key ? `<span>Key: ${msg.key}</span>` : ''}
+            ${msg.publishTime ? `<span>${new Date(msg.publishTime).toLocaleString()}</span>` : ''}
+          </div>
+          ${propsHtml}
+          <pre class="peek-msg-payload">${escHtml(payload)}</pre>
+        `;
+        container.appendChild(el);
+      });
+    } catch (e) {
+      container.innerHTML = `<div class="peek-empty" style="color:var(--error);">Error: ${e.message}</div>`;
+    }
+  }
+
+  document.getElementById('peekModalClose').addEventListener('click', () => {
+    document.getElementById('peekModal').style.display = 'none';
+  });
+
+  let pendingSkipSub = null;
+
+  function openSkipModal(sub) {
+    pendingSkipSub = sub;
+    document.getElementById('skipModalSub').textContent = sub;
+    document.getElementById('skipCount').value = '10';
+    document.getElementById('skipModal').style.display = 'flex';
+    document.getElementById('skipCount').focus();
+  }
+
+  document.getElementById('skipModalCancel').addEventListener('click', () => {
+    document.getElementById('skipModal').style.display = 'none';
+  });
+
+  document.getElementById('skipModalConfirm').addEventListener('click', async () => {
+    const sub = pendingSkipSub;
+    if (!sub) return;
+    const numMessages = parseInt(document.getElementById('skipCount').value, 10) || 10;
+    const { serviceUrl, topic, token } = subActionParams();
+    document.getElementById('skipModal').style.display = 'none';
+
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/subscription/skip`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serviceUrl, topic, subscription: sub, token, numMessages }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        showAuthError(data.error || 'Skip failed');
+        if (data.authFailed) subActionsAllowed = false;
+        return;
+      }
+      refreshCurrentTopic();
+    } catch (e) {
+      showAuthError('Skip failed: ' + e.message);
+    }
+  });
+
+  async function confirmClearBacklog(sub) {
+    if (!confirm(`Clear all backlog for subscription "${sub}"?\n\nThis will skip all unacknowledged messages.`)) return;
+    const { serviceUrl, topic, token } = subActionParams();
+
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/subscription/clear-backlog`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serviceUrl, topic, subscription: sub, token }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        showAuthError(data.error || 'Clear backlog failed');
+        if (data.authFailed) subActionsAllowed = false;
+        return;
+      }
+      refreshCurrentTopic();
+    } catch (e) {
+      showAuthError('Clear backlog failed: ' + e.message);
+    }
+  }
+
+  async function confirmUnsubscribe(sub) {
+    if (!confirm(`Delete subscription "${sub}"?\n\nThis action cannot be undone.`)) return;
+    const { serviceUrl, topic, token } = subActionParams();
+
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/subscription/unsubscribe`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serviceUrl, topic, subscription: sub, token }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        showAuthError(data.error || 'Unsubscribe failed');
+        if (data.authFailed) subActionsAllowed = false;
+        return;
+      }
+      refreshCurrentTopic();
+    } catch (e) {
+      showAuthError('Unsubscribe failed: ' + e.message);
+    }
   }
 
   // ─── Partition Summary ───────────────────────────────────────────────────
@@ -1463,9 +1727,15 @@
     const tmpl = templates[name];
     if (!tmpl) return;
     document.getElementById('sendKey').value = tmpl.key || '';
-    document.getElementById('sendProps').value = tmpl.properties || '';
     document.getElementById('sendPayload').value = tmpl.payload || '';
     templateNameEl.value = name;
+
+    let propsObj = tmpl.properties;
+    if (typeof propsObj === 'string' && propsObj.trim()) {
+      try { propsObj = JSON.parse(propsObj); } catch { propsObj = null; }
+    }
+    setPropertiesInEditor(propsObj || null);
+
     addProducerMessage('info', `Loaded template: ${name}`);
   }
 
@@ -1484,7 +1754,7 @@
     const templates = loadTemplates();
     templates[name] = {
       key: document.getElementById('sendKey').value.trim(),
-      properties: document.getElementById('sendProps').value.trim(),
+      properties: getPropertiesFromEditor() || {},
       payload: document.getElementById('sendPayload').value,
     };
     saveTemplates(templates);

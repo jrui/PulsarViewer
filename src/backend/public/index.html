@@ -200,8 +200,14 @@
                 <input type="text" id="sendKey" placeholder="message key" />
               </div>
               <div class="form-row">
-                <label>Properties <span class="optional">(JSON)</span></label>
-                <textarea id="sendProps" rows="2" placeholder='{"key":"value"}'></textarea>
+                <label>
+                  Properties <span class="optional">(optional)</span>
+                  <button type="button" id="addPropBtn" class="btn-sm btn-ghost prop-add-btn" title="Add property">+ Add</button>
+                </label>
+                <div id="propsEditor" class="props-editor">
+                  <div class="props-empty">No properties — click + Add</div>
+                </div>
+                <input type="hidden" id="sendProps" />
               </div>
               <div class="form-row">
                 <label>
@@ -258,13 +264,11 @@
           <div class="topic-browser">
             <div class="browser-header">
               <span>Topics</span>
-              <div class="browser-controls">
-                <input type="text" id="namespaceInput" placeholder="public/default" class="browser-input" value="public/default" />
-                <button id="loadTopicsBtn" class="btn-sm btn-primary">Load</button>
-              </div>
+              <input type="hidden" id="namespaceInput" value="public/default" />
+              <button id="loadTopicsBtn" class="btn-sm btn-ghost" title="Refresh topics">↻</button>
             </div>
             <div id="topic-list" class="topic-list">
-              <div class="placeholder-text">Connect and click Load to browse topics</div>
+              <div class="placeholder-text">Connect to browse topics</div>
             </div>
           </div>
 
@@ -345,6 +349,7 @@
                         <th>Consumers</th>
                         <th>Msg Backlog</th>
                         <th>Msg Rate Out</th>
+                        <th id="sub-actions-th" class="th-actions">Actions</th>
                       </tr>
                     </thead>
                     <tbody id="subscriptions-tbody"></tbody>
@@ -404,6 +409,35 @@
       <div class="modal-actions">
         <button id="labelModalCancel" class="btn-ghost">Cancel</button>
         <button id="labelModalSave" class="btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Peek Messages Modal -->
+  <div id="peekModal" class="modal-overlay" style="display:none;">
+    <div class="modal-box modal-wide">
+      <div class="modal-title-row">
+        <h3>Peek Messages — <span id="peekModalSub" class="topic-chip"></span></h3>
+        <button id="peekModalClose" class="toast-close" style="font-size:20px;">×</button>
+      </div>
+      <div class="peek-controls">
+        <label class="toolbar-label">Count</label>
+        <input type="number" id="peekCount" value="5" min="1" max="100" class="toolbar-input peek-count-input" />
+        <button id="peekFetchBtn" class="btn-sm btn-primary">Fetch</button>
+      </div>
+      <div id="peekMessages" class="peek-messages"></div>
+    </div>
+  </div>
+
+  <!-- Skip Messages Modal -->
+  <div id="skipModal" class="modal-overlay" style="display:none;">
+    <div class="modal-box">
+      <h3>Skip Messages</h3>
+      <p class="modal-desc">Skip messages in <strong id="skipModalSub"></strong></p>
+      <input type="number" id="skipCount" value="10" min="1" class="modal-input" placeholder="Number of messages to skip" />
+      <div class="modal-actions">
+        <button id="skipModalCancel" class="btn-ghost">Cancel</button>
+        <button id="skipModalConfirm" class="btn-primary">Skip</button>
       </div>
     </div>
   </div>
