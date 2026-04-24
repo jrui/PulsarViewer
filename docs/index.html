@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="PulsarViewer — desktop app to inspect, produce, and manage Apache Pulsar topics. See an interactive preview, then clone or download from GitHub."
+    />
+    <title>PulsarViewer — Apache Pulsar desktop client</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;0,9..40,700;1,9..40,400&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header">
+      <div class="wrap inner">
+        <a class="brand" href="#top" id="top">
+          <img
+            class="brand-logo"
+            src="img/logo.png"
+            alt=""
+            width="40"
+            height="40"
+            decoding="async"
+          />
+          PulsarViewer
+        </a>
+        <nav class="nav-actions" aria-label="Primary">
+          <a class="btn btn-ghost" href="#preview">Preview</a>
+          <a class="btn btn-ghost" href="#github">Source &amp; Releases</a>
+          <a
+            class="btn btn-primary"
+            href="https://github.com/jrui/PulsarViewer"
+            rel="noopener noreferrer"
+            target="_blank"
+            >GitHub</a
+          >
+        </nav>
+      </div>
+    </header>
+
+    <main id="main">
+      <div class="wrap hero">
+        <h1>Inspect and manage Pulsar topics from your desktop</h1>
+        <p class="lede">
+          PulsarViewer is a lightweight app with a Go backend and web UI: connect with a service URL,
+          optional JWT, stream messages, publish payloads, browse namespace stats, and use Protobuf
+          schemas—all without leaving one window.
+        </p>
+        <div class="hero-cta">
+          <a
+            class="btn btn-primary"
+            href="https://github.com/jrui/PulsarViewer/releases"
+            rel="noopener noreferrer"
+            target="_blank"
+            >Download releases</a
+          >
+          <a class="btn btn-ghost" href="#preview">See a preview</a>
+        </div>
+      </div>
+
+      <section id="preview" aria-labelledby="preview-heading">
+        <div class="wrap">
+          <h2 id="preview-heading">See a preview</h2>
+          <p class="section-intro section-intro-wide">
+            Nothing here talks to a real cluster. Use the tabs to explore a small sample of what the app feels like: consumer message list, a producer form, and a management-style topic table.
+          </p>
+
+          <div class="demo-shell">
+            <div class="demo-toolbar">
+              <span class="demo-badge">Mock</span>
+              <span style="color: var(--muted); font-size: 0.85rem"
+                >Topic: <code>persistent://public/default/demo</code> (not connected)</span
+              >
+            </div>
+            <div class="demo-tabs" role="tablist" aria-label="Demo views">
+              <button
+                type="button"
+                id="tab-consumer"
+                class="demo-tab"
+                role="tab"
+                aria-selected="true"
+                aria-controls="panel-consumer"
+                data-tab="consumer"
+              >
+                Consumer
+              </button>
+              <button
+                type="button"
+                id="tab-producer"
+                class="demo-tab"
+                role="tab"
+                aria-selected="false"
+                aria-controls="panel-producer"
+                data-tab="producer"
+              >
+                Producer
+              </button>
+              <button
+                type="button"
+                id="tab-management"
+                class="demo-tab"
+                role="tab"
+                aria-selected="false"
+                aria-controls="panel-management"
+                data-tab="management"
+              >
+                Management
+              </button>
+            </div>
+
+            <div
+              id="panel-consumer"
+              class="demo-panel"
+              role="tabpanel"
+              aria-labelledby="tab-consumer"
+              aria-hidden="false"
+            >
+              <div class="filter-row">
+                <label class="visually-hidden" for="mock-filter">Filter messages</label>
+                <input
+                  id="mock-filter"
+                  type="search"
+                  placeholder="Filter payload or key…"
+                  autocomplete="off"
+                />
+                <label><input id="mock-regex" type="checkbox" /> Regex</label>
+                <button type="button" class="btn btn-ghost" id="mock-clear">Clear</button>
+                <button type="button" class="btn btn-ghost" id="mock-add-one">Add message</button>
+                <button type="button" class="btn btn-ghost" id="mock-stream">Simulate stream</button>
+              </div>
+              <div class="msg-table-wrap">
+                <table class="msg-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Timestamp</th>
+                      <th scope="col">Key</th>
+                      <th scope="col">Payload</th>
+                      <th scope="col">Msg ID</th>
+                    </tr>
+                  </thead>
+                  <tbody id="mock-msg-body"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div
+              id="panel-producer"
+              class="demo-panel"
+              role="tabpanel"
+              aria-labelledby="tab-producer"
+              aria-hidden="true"
+              hidden
+            >
+              <form id="mock-producer-form" class="mock-form">
+                <div>
+                  <label for="mock-key">Key (optional)</label>
+                  <input id="mock-key" name="key" type="text" placeholder="e.g. order-id" />
+                </div>
+                <div>
+                  <label for="mock-payload">Payload</label>
+                  <textarea id="mock-payload" name="payload" placeholder='{"hello":"pulsar"}'></textarea>
+                </div>
+                <button type="submit" class="btn btn-primary" style="width: fit-content">
+                  Send message (mock)
+                </button>
+                <p id="mock-producer-toast" class="toast" role="status"></p>
+              </form>
+            </div>
+
+            <div
+              id="panel-management"
+              class="demo-panel"
+              role="tabpanel"
+              aria-labelledby="tab-management"
+              aria-hidden="true"
+              hidden
+            >
+              <p style="color: var(--muted); font-size: 0.9rem; margin-top: 0">
+                Sample topics in the current namespace (static numbers).
+              </p>
+              <div class="msg-table-wrap">
+                <table class="mgmt-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Topic</th>
+                      <th scope="col">In</th>
+                      <th scope="col">Out</th>
+                      <th scope="col">Storage</th>
+                      <th scope="col">Subs</th>
+                      <th scope="col">Producers</th>
+                    </tr>
+                  </thead>
+                  <tbody id="mock-mgmt-body"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="features" aria-labelledby="features-heading">
+        <div class="wrap">
+          <h2 id="features-heading">Features</h2>
+          <ul class="feature-list">
+            <li>DBeaver-like UI.</li>
+            <li>Ability to save connections.</li>
+            <li>Support for SSL/TLS.</li>
+            <li>Protobuf encoding and decoding.</li>
+            <li>Topic and namespace inspection with automatic, token permission-based feature availability.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="github" aria-labelledby="github-heading">
+        <div class="wrap">
+          <h2 id="github-heading">Source &amp; Releases</h2>
+          <p class="section-intro section-intro-wide">
+            The project lives on GitHub. Use releases for installers, Docker for a browser build, or clone to run the dev stack locally.
+          </p>
+
+          <div class="github-grid">
+            <div class="card">
+              <h3 style="margin: 0 0 0.5rem; font-size: 1rem">Repository</h3>
+              <p style="margin: 0 0 1rem; color: var(--muted); font-size: 0.9rem">
+                Browse issues, PRs, and full source.
+              </p>
+              <p style="margin: 0">
+                <a href="https://github.com/jrui/PulsarViewer" rel="noopener noreferrer" target="_blank"
+                  >github.com/jrui/PulsarViewer</a
+                >
+              </p>
+            </div>
+            <div class="card">
+              <h3 style="margin: 0 0 0.5rem; font-size: 1rem">Clone</h3>
+              <pre class="code-block" aria-label="Git clone command"><code id="clone-snippet">git clone https://github.com/jrui/PulsarViewer.git
+cd PulsarViewer</code></pre>
+              <div class="copy-row">
+                <button type="button" class="btn btn-ghost" data-copy data-copy-target="#clone-snippet">
+                  Copy clone commands
+                </button>
+              </div>
+            </div>
+            <div class="card">
+              <h3 style="margin: 0 0 0.5rem; font-size: 1rem">Releases &amp; binaries</h3>
+              <p style="margin: 0 0 0.75rem; color: var(--muted); font-size: 0.9rem">
+                Pre-built installers for macOS, Windows, and Linux.
+              </p>
+              <ul class="link-list">
+                <li>
+                  <a href="https://github.com/jrui/PulsarViewer/releases" rel="noopener noreferrer" target="_blank"
+                    >GitHub Releases</a
+                  >
+                </li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3 style="margin: 0 0 0.5rem; font-size: 1rem">Docker image</h3>
+              <p style="margin: 0 0 0.75rem; color: var(--muted); font-size: 0.9rem">
+                Run the web UI locally (see project README for details).
+              </p>
+              <pre class="code-block"><code id="docker-snippet">docker pull ghcr.io/jrui/pulsarviewer:latest
+docker run --rm -p 3000:3000 ghcr.io/jrui/pulsarviewer</code></pre>
+              <div class="copy-row">
+                <button type="button" class="btn btn-ghost" data-copy data-copy-target="#docker-snippet">
+                  Copy Docker commands
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap">
+        <p style="margin: 0">
+          © <span id="year">2026</span> PulsarViewer ·
+          <a href="https://github.com/jrui/PulsarViewer" rel="noopener noreferrer" target="_blank">GitHub</a>
+        </p>
+      </div>
+    </footer>
+
+    <script src="js/mock-demo.js"></script>
+  </body>
+</html>
