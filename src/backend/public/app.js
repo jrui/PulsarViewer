@@ -419,7 +419,12 @@
 
     const pre = document.createElement('pre');
     pre.className = 'msg-payload';
-    const raw = typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2);
+    let raw;
+    if (payload && typeof payload === 'object' && payload.json) {
+      try { raw = JSON.stringify(payload.json, null, 2); } catch { raw = JSON.stringify(payload, null, 2); }
+    } else {
+      raw = typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2);
+    }
     pre.innerHTML = syntaxHighlight(raw);
 
     container.appendChild(meta);
@@ -543,7 +548,14 @@
     payloadCol.className = 'msg-payload-col';
     const pre = document.createElement('pre');
     pre.className = 'msg-payload';
-    pre.innerHTML = syntaxHighlight(msg.payload || JSON.stringify(msg, null, 2));
+    // Prefer decoded JSON when available
+    let displayPayload;
+    if (msg && msg.json) {
+      try { displayPayload = JSON.stringify(msg.json, null, 2); } catch { displayPayload = msg.payload || JSON.stringify(msg, null, 2); }
+    } else {
+      displayPayload = msg.payload || JSON.stringify(msg, null, 2);
+    }
+    pre.innerHTML = syntaxHighlight(displayPayload);
     payloadCol.appendChild(pre);
 
     const detailCol = document.createElement('div');
