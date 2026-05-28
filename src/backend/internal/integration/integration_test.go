@@ -694,7 +694,13 @@ message UserProfile {
 		t.Fatal("complex encode returned empty base64")
 	}
 
-	urlSafeB64 := base64.RawURLEncoding.EncodeToString(mustDecodeBase64(t, b64))
+	// Re-encode encoded bytes as raw URL-safe base64 to validate /api/proto/decode
+	// accepts URL-safe variants in addition to standard base64.
+	raw, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		t.Fatalf("failed to decode encoded base64 payload: %v", err)
+	}
+	urlSafeB64 := base64.RawURLEncoding.EncodeToString(raw)
 	decResp := jsonPost(t, base+"/api/proto/decode", map[string]interface{}{"data": urlSafeB64})
 	requireStatus(t, decResp, 200)
 	decData := readJSON(t, decResp)
@@ -743,20 +749,6 @@ message UserProfile {
 	}
 
 	jsonPost(t, base+"/api/proto/clear", nil).Body.Close()
-}
-
-func mustDecodeBase64(t *testing.T, b64 string) []byte {
-	t.Helper()
-	raw, err := base64.StdEncoding.DecodeString(b64)
-	if err == nil {
-		return raw
-	}
-	raw, err = base64.RawStdEncoding.DecodeString(b64)
-	if err == nil {
-		return raw
-	}
-	t.Fatalf("failed to decode base64 test fixture: %v", err)
-	return nil
 }
 
 func TestProtobufProducerIntegration(t *testing.T) {
