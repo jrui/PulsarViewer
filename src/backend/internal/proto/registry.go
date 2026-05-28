@@ -138,7 +138,13 @@ func (r *Registry) DecodeBase64(b64 string) (string, error) {
 	if err != nil {
 		raw, err = base64.RawStdEncoding.DecodeString(b64)
 		if err != nil {
-			return "", fmt.Errorf("invalid base64: %w", err)
+			raw, err = base64.URLEncoding.DecodeString(b64)
+			if err != nil {
+				raw, err = base64.RawURLEncoding.DecodeString(b64)
+				if err != nil {
+					return "", fmt.Errorf("invalid base64: %w", err)
+				}
+			}
 		}
 	}
 	return r.Decode(raw)

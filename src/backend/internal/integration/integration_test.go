@@ -13,6 +13,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -609,6 +610,153 @@ message Person {
 	if statusData2["active"] != false {
 		t.Error("proto should be inactive after clear")
 	}
+}
+
+func TestProtobufRegisterDecodeEncodeComplexNested(t *testing.T) {
+	stop := startBackend(t)
+	defer stop()
+	base := baseURL(t)
+
+	protoSource := `
+syntax = "proto3";
+package test;
+
+message Coordinates {
+  double lat = 1;
+  double lng = 2;
+}
+
+message Address {
+  string street = 1;
+  string city = 2;
+  Coordinates coordinates = 3;
+}
+
+message Preference {
+  string key = 1;
+  string value = 2;
+}
+
+message UserProfile {
+  string user_id = 1;
+  int32 age = 2;
+  Address home_address = 3;
+  repeated string tags = 4;
+  repeated Preference preferences = 5;
+  map<string, string> metadata = 6;
+  bool is_active = 7;
+  string extra_note = 8;
+}
+`
+
+	regResp := jsonPost(t, base+"/api/proto/register", map[string]interface{}{
+		"source":      protoSource,
+		"messageType": "test.UserProfile",
+	})
+	requireStatus(t, regResp, 200)
+	regData := readJSON(t, regResp)
+	if regData["ok"] != true {
+		t.Fatalf("complex proto register failed: %v", regData)
+	}
+
+	input := map[string]interface{}{
+		"userId": "user-123",
+		"age":    42,
+		"homeAddress": map[string]interface{}{
+			"street": "1 Main St",
+			"city":   "Metropolis",
+			"coordinates": map[string]interface{}{
+				"lat": 12.34,
+				"lng": 56.78,
+			},
+		},
+		"tags": []string{"alpha", "beta"},
+		"preferences": []map[string]interface{}{
+			{"key": "theme", "value": "dark"},
+			{"key": "lang", "value": "en"},
+		},
+		"metadata": map[string]string{
+			"env":    "test",
+			"region": "us-east-1",
+		},
+		"isActive":  true,
+		"extraNote": "complex nested payload validation",
+	}
+
+	encResp := jsonPost(t, base+"/api/proto/encode", map[string]interface{}{"json": input})
+	requireStatus(t, encResp, 200)
+	encData := readJSON(t, encResp)
+	if encData["ok"] != true {
+		t.Fatalf("complex proto encode failed: %v", encData)
+	}
+	b64, ok := encData["base64"].(string)
+	if !ok || b64 == "" {
+		t.Fatal("complex encode returned empty base64")
+	}
+
+	urlSafeB64 := base64.RawURLEncoding.EncodeToString(mustDecodeBase64(t, b64))
+	decResp := jsonPost(t, base+"/api/proto/decode", map[string]interface{}{"data": urlSafeB64})
+	requireStatus(t, decResp, 200)
+	decData := readJSON(t, decResp)
+	if decData["ok"] != true {
+		t.Fatalf("complex proto decode failed: %v", decData)
+	}
+
+	decoded, ok := decData["json"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("decoded complex payload is not an object: %T", decData["json"])
+	}
+
+	if decoded["userId"] != "user-123" {
+		t.Errorf("decoded userId=%v, want user-123", decoded["userId"])
+	}
+	if decoded["extraNote"] != "complex nested payload validation" {
+		t.Errorf("decoded extraNote=%v, want complex nested payload validation", decoded["extraNote"])
+	}
+	if decoded["isActive"] != true {
+		t.Errorf("decoded isActive=%v, want true", decoded["isActive"])
+	}
+
+	homeAddress, ok := decoded["homeAddress"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("decoded homeAddress is not an object: %T", decoded["homeAddress"])
+	}
+	coords, ok := homeAddress["coordinates"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("decoded coordinates is not an object: %T", homeAddress["coordinates"])
+	}
+	if coords["lat"] != 12.34 {
+		t.Errorf("decoded coordinates.lat=%v, want 12.34", coords["lat"])
+	}
+
+	tags, ok := decoded["tags"].([]interface{})
+	if !ok || len(tags) != 2 {
+		t.Fatalf("decoded tags=%v, want length 2", decoded["tags"])
+	}
+
+	metadata, ok := decoded["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("decoded metadata is not an object: %T", decoded["metadata"])
+	}
+	if metadata["env"] != "test" {
+		t.Errorf("decoded metadata.env=%v, want test", metadata["env"])
+	}
+
+	jsonPost(t, base+"/api/proto/clear", nil).Body.Close()
+}
+
+func mustDecodeBase64(t *testing.T, b64 string) []byte {
+	t.Helper()
+	raw, err := base64.StdEncoding.DecodeString(b64)
+	if err == nil {
+		return raw
+	}
+	raw, err = base64.RawStdEncoding.DecodeString(b64)
+	if err == nil {
+		return raw
+	}
+	t.Fatalf("failed to decode base64 test fixture: %v", err)
+	return nil
 }
 
 func TestProtobufProducerIntegration(t *testing.T) {
