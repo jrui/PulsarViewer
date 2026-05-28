@@ -2,12 +2,14 @@ package stream
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/jrui/pulsarviewer/internal/proto"
 	"github.com/jrui/pulsarviewer/internal/pulsar"
 	"github.com/jrui/pulsarviewer/internal/store"
 )
@@ -28,6 +30,7 @@ type StreamManager struct {
 	mu           sync.RWMutex
 	pulsarClient *pulsar.ClientManager
 	messageStore *store.MessageStore
+	protoRegistry *proto.Registry
 }
 
 // Stream represents a single persistent consumer
@@ -35,6 +38,7 @@ type Stream struct {
 	key        StreamKey
 	client     *pulsar.ClientManager
 	store      *store.MessageStore
+	registry   *proto.Registry
 	ctx        context.Context
 	cancel     context.CancelFunc
 	done       chan struct{}
@@ -42,11 +46,12 @@ type Stream struct {
 	mu         sync.RWMutex
 }
 
-func NewStreamManager(pulsarClient *pulsar.ClientManager, messageStore *store.MessageStore) *StreamManager {
+func NewStreamManager(pulsarClient *pulsar.ClientManager, messageStore *store.MessageStore, protoRegistry *proto.Registry) *StreamManager {
 	return &StreamManager{
 		streams:      make(map[string]*Stream),
 		pulsarClient: pulsarClient,
 		messageStore: messageStore,
+		protoRegistry: protoRegistry,
 	}
 }
 
@@ -65,6 +70,7 @@ func (sm *StreamManager) GetOrCreateStream(key StreamKey) error {
 		key:    key,
 		client: sm.pulsarClient,
 		store:  sm.messageStore,
+		registry: sm.protoRegistry,
 		ctx:    ctx,
 		cancel: cancel,
 		done:   make(chan struct{}),
@@ -162,6 +168,35 @@ func (s *Stream) streamOnce() {
 			Key:         msg.Key,
 			Payload:     msg.Payload,
 			JSON:        msg.JSON,
+		}
+
+		// If a proto registry is active, try to decode the payload so stored messages
+		// are searchable and have JSON representations.
+		if s.registry != nil && s.registry.IsActive() {
+			// Try decode from string payload first
+			if decoded, ok := s.registry.TryDecode([]byte(msg.Payload)); ok {
+				storeMsg.Payload = decoded
+				var jp interface{}
+				if err := json.Unmarshal([]byte(decoded), &jp); err == nil {
+					storeMsg.JSON = jp
+				}
+				if storeMsg.Properties == nil {
+					storeMsg.Properties = make(map[string]string)
+				}
+				storeMsg.Properties["_pv_proto_decoded"] = "true"
+			} else if msg.RawPayload != nil {
+				if decoded, ok := s.registry.TryDecode(msg.RawPayload); ok {
+					storeMsg.Payload = decoded
+					var jp interface{}
+					if err := json.Unmarshal([]byte(decoded), &jp); err == nil {
+						storeMsg.JSON = jp
+					}
+					if storeMsg.Properties == nil {
+						storeMsg.Properties = make(map[string]string)
+					}
+					storeMsg.Properties["_pv_proto_decoded"] = "true"
+				}
+			}
 		}
 
 		// Try to add message, if store is full, stop consuming
