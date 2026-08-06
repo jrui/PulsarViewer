@@ -134,14 +134,25 @@ func (r *Registry) Decode(raw []byte) (string, error) {
 
 // DecodeBase64 decodes a base64-encoded protobuf payload to JSON.
 func (r *Registry) DecodeBase64(b64 string) (string, error) {
-	raw, err := base64.StdEncoding.DecodeString(b64)
-	if err != nil {
-		raw, err = base64.RawStdEncoding.DecodeString(b64)
-		if err != nil {
-			return "", fmt.Errorf("invalid base64: %w", err)
+	decoders := []func(string) ([]byte, error){
+		base64.StdEncoding.DecodeString,
+		base64.RawStdEncoding.DecodeString,
+		base64.URLEncoding.DecodeString,
+		base64.RawURLEncoding.DecodeString,
+	}
+
+	var (
+		raw []byte
+		err error
+	)
+	for _, decode := range decoders {
+		raw, err = decode(b64)
+		if err == nil {
+			return r.Decode(raw)
 		}
 	}
-	return r.Decode(raw)
+
+	return "", fmt.Errorf("invalid base64: failed all supported encodings")
 }
 
 // Encode takes a JSON string and returns protobuf bytes.

@@ -44,11 +44,12 @@ type ConnectionState struct {
 
 func NewHTTPHandler(pulsarClient *pulsar.ClientManager, messageStore *store.MessageStore) http.Handler {
 	mux := http.NewServeMux()
+	protoReg := proto.NewRegistry()
 	handler := &HTTPHandler{
 		pulsarClient:  pulsarClient,
 		messageStore:  messageStore,
-		streamManager: stream.NewStreamManager(pulsarClient, messageStore),
-		protoRegistry: proto.NewRegistry(),
+		streamManager: nil,
+		protoRegistry: protoReg,
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -58,6 +59,7 @@ func NewHTTPHandler(pulsarClient *pulsar.ClientManager, messageStore *store.Mess
 		},
 		connections: make(map[string]*ConnectionState),
 	}
+	handler.streamManager = stream.NewStreamManager(pulsarClient, messageStore, handler.protoRegistry)
 
 	// Determine the public directory path
 	// The backend can be run from:
@@ -167,6 +169,39 @@ func (h *HTTPHandler) handleGetMessages(w http.ResponseWriter, r *http.Request) 
 	}
 
 	messages, total := h.messageStore.GetPage(page, pageSize)
+
+	// If protobuf schema is active, try to decode messages before returning so UI
+	// sees decoded JSON immediately (covers historical messages consumed before
+	// schema registration).
+	if h.protoRegistry != nil && h.protoRegistry.IsActive() {
+		for _, m := range messages {
+			// Prefer decoding from stored payload string
+			if decoded, ok := h.protoRegistry.TryDecode([]byte(m.Payload)); ok {
+				m.Payload = decoded
+				var jp interface{}
+				if err := json.Unmarshal([]byte(decoded), &jp); err == nil {
+					m.JSON = jp
+				}
+				if m.Properties == nil {
+					m.Properties = make(map[string]string)
+				}
+				m.Properties["_pv_proto_decoded"] = "true"
+				continue
+			}
+			// Try decoding from base64-encoded payload if present
+			if decodedStr, err := h.protoRegistry.DecodeBase64(m.Payload); err == nil {
+				m.Payload = decodedStr
+				var jp interface{}
+				if err := json.Unmarshal([]byte(decodedStr), &jp); err == nil {
+					m.JSON = jp
+				}
+				if m.Properties == nil {
+					m.Properties = make(map[string]string)
+				}
+				m.Properties["_pv_proto_decoded"] = "true"
+			}
+		}
+	}
 
 	// Ensure messages is never nil in JSON (use empty array instead)
 	if messages == nil {
@@ -1761,6 +1796,40 @@ func (h *HTTPHandler) handleProtoRegister(w http.ResponseWriter, r *http.Request
 		json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
 		return
 	}
+
+	// After registering a schema, try to retroactively decode any messages
+	// already present in the global message store so they become searchable
+	// and visible as decoded JSON in the UI.
+	go func() {
+		msgs := h.messageStore.GetAll()
+		for _, m := range msgs {
+			// Attempt decode from string payload first
+			if decoded, ok := h.protoRegistry.TryDecode([]byte(m.Payload)); ok {
+				m.Payload = decoded
+				var jp interface{}
+				if err := json.Unmarshal([]byte(decoded), &jp); err == nil {
+					m.JSON = jp
+				}
+				if m.Properties == nil {
+					m.Properties = make(map[string]string)
+				}
+				m.Properties["_pv_proto_decoded"] = "true"
+				continue
+			}
+			// Try decode from base64 if payload looks like base64
+			if decodedStr, err := h.protoRegistry.DecodeBase64(m.Payload); err == nil {
+				m.Payload = decodedStr
+				var jp interface{}
+				if err := json.Unmarshal([]byte(decodedStr), &jp); err == nil {
+					m.JSON = jp
+				}
+				if m.Properties == nil {
+					m.Properties = make(map[string]string)
+				}
+				m.Properties["_pv_proto_decoded"] = "true"
+			}
+		}
+	}()
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":           true,
