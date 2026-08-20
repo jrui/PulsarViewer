@@ -78,6 +78,8 @@ Download installers for **macOS**, **Windows**, and **Linux** from [Releases](ht
 **macOS:** If Gatekeeper blocks the app (“Apple could not verify … free of malware”), remove the quarantine attribute and open from the CLI:  
 `xattr -cr "/Applications/PulsarViewer.app" && open "/Applications/PulsarViewer.app"`
 
+**Automatic updates:** the desktop app checks for new releases on startup and offers to install them in place. You can choose *Install & Restart*, *Later* (asks again next launch), or *Skip this version* (stays quiet until the next release). Update packages are signed, and only updates carrying a valid signature are installed. Docker and browser users update by pulling a newer image instead.
+
 <br>
 
 ### Docker

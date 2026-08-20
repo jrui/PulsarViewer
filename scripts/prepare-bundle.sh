@@ -6,7 +6,7 @@ set -e
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BACKEND_DIR="$PROJECT_ROOT/src/backend"
-PUBLIC_DIR="$PROJECT_ROOT/public"
+PUBLIC_DIR="$BACKEND_DIR/public"
 
 echo "🔨 Preparing bundle resources..."
 echo "Project root: $PROJECT_ROOT"

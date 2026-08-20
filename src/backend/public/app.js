@@ -1938,11 +1938,94 @@
     'pv_topic_browser_width', 140, 600
   );
 
+  // ─── Auto-Update ──────────────────────────────────────────────────────────
+  const SKIPPED_VERSION_KEY = 'pv_skipped_version';
+
+  const updateModal            = document.getElementById('updateModal');
+  const updateModalVersion     = document.getElementById('updateModalVersion');
+  const updateModalCurrent     = document.getElementById('updateModalCurrent');
+  const updateModalCurrentWrap = document.getElementById('updateModalCurrentWrap');
+  const updateModalNotes       = document.getElementById('updateModalNotes');
+  const updateModalStatus      = document.getElementById('updateModalStatus');
+  const updateModalSkip        = document.getElementById('updateModalSkip');
+  const updateModalLater       = document.getElementById('updateModalLater');
+  const updateModalInstall     = document.getElementById('updateModalInstall');
+
+  function setUpdateStatus(text, isError) {
+    if (!text) { updateModalStatus.style.display = 'none'; return; }
+    updateModalStatus.textContent = text;
+    updateModalStatus.className = 'update-status' + (isError ? ' update-status-error' : '');
+    updateModalStatus.style.display = '';
+  }
+
+  async function checkForUpdates() {
+    const tauri = window.__TAURI__;
+    // Only packaged desktop builds can self-update; browser/Docker users update the image.
+    if (!tauri || !tauri.updater || typeof tauri.updater.checkUpdate !== 'function') return;
+
+    let result;
+    try {
+      result = await tauri.updater.checkUpdate();
+    } catch (err) {
+      // Offline, rate-limited, or no manifest published yet — never block startup.
+      console.warn('[updater] check failed:', err);
+      return;
+    }
+    if (!result || !result.shouldUpdate || !result.manifest) return;
+
+    const version = result.manifest.version;
+    if (!version) return;
+    // Honour a previous "Skip this version"; a newer release still prompts.
+    if (localStorage.getItem(SKIPPED_VERSION_KEY) === version) return;
+
+    updateModalVersion.textContent = version;
+    updateModalNotes.textContent = (result.manifest.body || '').trim();
+
+    try {
+      updateModalCurrent.textContent = await tauri.app.getVersion();
+      updateModalCurrentWrap.style.display = '';
+    } catch {
+      updateModalCurrentWrap.style.display = 'none';
+    }
+
+    setUpdateStatus('');
+    updateModalInstall.disabled = false;
+    updateModalSkip.disabled = false;
+    updateModal.style.display = 'flex';
+
+    updateModalSkip.onclick = () => {
+      localStorage.setItem(SKIPPED_VERSION_KEY, version);
+      updateModal.style.display = 'none';
+    };
+
+    updateModalLater.onclick = () => {
+      updateModal.style.display = 'none';
+    };
+
+    updateModalInstall.onclick = async () => {
+      updateModalInstall.disabled = true;
+      updateModalSkip.disabled = true;
+      setUpdateStatus('Downloading update…');
+      try {
+        await tauri.updater.installUpdate();
+        setUpdateStatus('Update installed. Restarting…');
+        await tauri.process.relaunch();
+      } catch (err) {
+        setUpdateStatus(`Update failed: ${err}. You can download it manually from the releases page.`, true);
+        updateModalInstall.disabled = false;
+        updateModalSkip.disabled = false;
+      }
+    };
+  }
+
   // ─── Init ─────────────────────────────────────────────────────────────────
   (async () => {
     await refreshSavedConnections();
     refreshTemplatesList();
     setConnected(false);
+
+    // Fire-and-forget so a slow/unavailable update endpoint never delays startup.
+    checkForUpdates();
 
     // Restore proto status on load
     try {

@@ -2,7 +2,8 @@
   "build": {
     "beforeDevCommand": "bash -c 'cd src/backend && go run ./cmd/main.go'",
     "devPath": "http://localhost:3000",
-    "distDir": "../src/backend/public"
+    "distDir": "../src/backend/public",
+    "withGlobalTauri": true
   },
   "package": {
     "productName": "PulsarViewer",
@@ -21,6 +22,10 @@
             "sidecar": true
           }
         ]
+      },
+      "process": {
+        "all": false,
+        "relaunch": true
       }
     },
     "bundle": {
@@ -29,7 +34,8 @@
         "dmg",
         "app",
         "appimage",
-        "msi"
+        "msi",
+        "updater"
       ],
       "identifier": "com.pulsarviewer.app",
       "icon": [
@@ -43,7 +49,7 @@
         "../src/backend/pulsarviewer-backend"
       ],
       "resources": [
-        "../public"
+        "../src/backend/public"
       ]
     },
     "windows": [
@@ -54,7 +60,15 @@
         "resizable": true,
         "fullscreen": false
       }
-    ]
+    ],
+    "updater": {
+      "active": true,
+      "dialog": false,
+      "endpoints": [
+        "https://github.com/jrui/PulsarViewer/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk3MUYxMzg2MDMzQTM5QjAKUldTd09Ub0RoaE1mbDBFdGpod2VPTFdoRHhOYjZwZHRBVXNCdFQyK0FLb0ltcVY4Skg0OFFZNU0K"
+    }
   }
 }
 

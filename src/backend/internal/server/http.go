@@ -72,19 +72,25 @@ func NewHTTPHandler(pulsarClient *pulsar.ClientManager, messageStore *store.Mess
 	exePath, _ := os.Executable()
 	exeDir := filepath.Dir(exePath)
 
-	// Try multiple paths to find the public directory
+	// Try multiple paths to find the public directory.
+	// The UI now has a single source of truth at src/backend/public, which is what
+	// both the Docker image and the Tauri bundle ship.
 	possiblePaths := []string{
-		// From development in src/backend
-		"./public", // src/backend/public
-		// From Tauri macOS bundle structure
-		// The app structure is: PulsarViewer.app/Contents/Resources/_up_/src/backend/pulsarviewer-backend (binary)
-		// Public files are at: PulsarViewer.app/Contents/Resources/_up_/public/
+		// Development / Docker: cwd is the dir holding public/
+		"./public",
+		// Tauri macOS bundle: sidecar lives in PulsarViewer.app/Contents/MacOS/,
+		// resources land in PulsarViewer.app/Contents/Resources/_up_/src/backend/public
+		filepath.Join(exeDir, "../Resources/_up_/src/backend/public"),
+		// Tauri Linux/Windows bundle: resources sit next to the executable
+		filepath.Join(exeDir, "_up_/src/backend/public"),
+		// CLI binary sitting next to its own public dir
+		filepath.Join(exeDir, "public"),
+		// Legacy bundle layouts (pre-3.0.20 shipped a separate root public/)
+		filepath.Join(exeDir, "../Resources/_up_/public"),
+		filepath.Join(exeDir, "../../Resources/_up_/public"),
 		filepath.Join(exeDir, "../../public"),
 		filepath.Join(exeDir, "../../../public"),
 		filepath.Join(exeDir, "../../../../public"),
-		// Alternative paths if structure is different
-		filepath.Join(exeDir, "../Resources/_up_/public"),
-		filepath.Join(exeDir, "../../Resources/_up_/public"),
 	}
 
 	fmt.Printf("[Server] Executable path: %s\n", exePath)
@@ -152,7 +158,31 @@ func NewHTTPHandler(pulsarClient *pulsar.ClientManager, messageStore *store.Mess
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
-	return mux
+	return withCORS(mux)
+}
+
+// withCORS makes every endpoint reachable from the Tauri desktop shell.
+// The packaged app loads its UI from the tauri:// custom protocol while the Go
+// sidecar serves the API on http://localhost:3000, so all API calls are
+// cross-origin. Browser and Docker usage is same-origin, where these headers are
+// inert. Without this only /api/stream (which sets its own headers) worked, so
+// the message list and Management tab stayed empty.
+func withCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Access-Control-Allow-Origin", "*")
+		h.Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		h.Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		h.Set("Access-Control-Max-Age", "86400")
+
+		// Preflight for POSTs sending application/json.
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (h *HTTPHandler) handleGetMessages(w http.ResponseWriter, r *http.Request) {
