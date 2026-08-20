@@ -1646,6 +1646,29 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   font-size: 11px;
 }
 
+/* ─── Update Available Modal ──────────────────────────────────────────────── */
+.update-notes {
+  max-height: 240px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+.update-notes:empty { display: none; }
+
+.update-status {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+.update-status.update-status-error { color: #e05555; }
+
 /* ─── Properties Key-Value Editor ─────────────────────────────────────────── */
 .prop-add-btn {
   float: right;
