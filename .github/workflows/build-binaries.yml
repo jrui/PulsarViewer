@@ -23,14 +23,17 @@ jobs:
         include:
           - os: macos-latest
             target: universal-apple-darwin
+            pr_bundles: dmg,app
             artifact_name: PulsarViewer_universal.dmg
             artifact_path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
+            pr_bundles: appimage
             artifact_name: pulsarviewer_amd64.AppImage
             artifact_path: src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
           - os: windows-latest
             target: x86_64-pc-windows-msvc
+            pr_bundles: msi
             artifact_name: PulsarViewer_x64_en-US.msi
             artifact_path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
 
@@ -109,8 +112,16 @@ jobs:
       - name: Generate Tauri icons
         run: npx @tauri-apps/cli icon src/backend/public/pulsar_viewer_logo.png
 
-      - name: Build Tauri app
+      - name: Build Tauri app (tag/dispatch)
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         run: npm run tauri:build -- --target ${{ matrix.target }}
+        env:
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+
+      - name: Build Tauri app (pull request)
+        if: github.event_name == 'pull_request'
+        run: npm run tauri:build -- --target ${{ matrix.target }} --bundles ${{ matrix.pr_bundles }}
 
       # Only upload release artifacts on tag push or manual dispatch; PRs validate build only
       - name: Upload artifacts
