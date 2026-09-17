@@ -9,6 +9,7 @@
   },
   "scripts": {
     "dev": "cd src/backend && go run ./cmd/main.go",
+    "test": "node --test src/backend/public/*.test.js",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"

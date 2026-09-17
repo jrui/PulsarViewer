@@ -1,6 +1,7 @@
 (() => {
   // In Tauri desktop app, frontend is served by the app; API runs on localhost:3000
   const API_BASE = (typeof window !== 'undefined' && window.__TAURI__) ? 'http://localhost:3000' : '';
+  const { decideLiveRefresh, shouldLoadInitialPage } = window.PulsarViewerLiveRefresh;
 
   // ─── Storage ────────────────────────────────────────────────────────────────
   const storage = {
@@ -38,6 +39,7 @@
   let currentPage = 0;
   let totalBackendMessages = 0;
   let previousBackendCount = 0;
+  let lastRawBackendCount = 0; // raw backend total, tracked independent of search mode, for live-refresh detection
   let isSearchActive = false;
   let pageRefreshTimer = null;
   let pendingPageRefresh = false;
@@ -46,7 +48,7 @@
   let selectedConnectionLabel = null;
   let selectedTopic = null; // for management tab
   let managementAutoRefreshTimer = null;
-  let managementAutoRefreshEnabled = true;
+  let managementAutoRefreshEnabled = false;
   let managementAutoRefreshInterval = 10; // seconds
   let managementTopicsLoaded = false;
 
@@ -70,7 +72,6 @@
   const paginationEl    = document.getElementById('pagination');
   const exportCsvBtn    = document.getElementById('exportCsvBtn');
   const clearBtn        = document.getElementById('clearBtn');
-  const connectionLabelEl = document.getElementById('connectionLabel');
   const saveConnectionBtn = document.getElementById('saveConnectionBtn');
   const deleteConnectionBtn = document.getElementById('deleteConnectionBtn');
   const savedConnectionsListEl = document.getElementById('saved-connections-list');
@@ -78,8 +79,6 @@
   const labelModalInput = document.getElementById('labelModalInput');
   const labelModalSave  = document.getElementById('labelModalSave');
   const labelModalCancel = document.getElementById('labelModalCancel');
-  const statusDot       = document.getElementById('status-dot');
-  const statusText      = document.getElementById('status-text');
   const tabStatusBadge  = document.getElementById('tab-status-badge');
   const authToast       = document.getElementById('auth-toast');
   const authToastMsg    = document.getElementById('auth-toast-msg');
@@ -127,12 +126,10 @@
   // ─── Connection status helpers ───────────────────────────────────────────────
   function setConnected(connected) {
     isConnected = connected;
-    statusDot.className = connected ? 'dot dot-connected' : 'dot';
-    statusText.textContent = connected ? 'Connected' : 'Disconnected';
     tabStatusBadge.textContent = connected ? 'Connected' : 'Disconnected';
     tabStatusBadge.className = connected ? 'badge-connected' : 'badge-disconnected';
-    connectBtn.disabled = connected;
-    disconnectBtn.disabled = !connected;
+    connectBtn.style.display = connected ? 'none' : '';
+    disconnectBtn.style.display = connected ? '' : 'none';
 
     if (connected) {
       deriveNamespaceFromTopic();
@@ -192,13 +189,12 @@
     subscriptionEl.value  = conn.subscription || 'viewer-sub';
     subTypeEl.value       = conn.subscriptionType || 'Exclusive';
     initialPosEl.value    = conn.initialPosition || 'latest';
-    connectionLabelEl.value = label;
     refreshSavedConnections();
     refreshTemplatesList();
   }
 
   saveConnectionBtn.addEventListener('click', () => {
-    labelModalInput.value = connectionLabelEl.value.trim();
+    labelModalInput.value = selectedConnectionLabel || '';
     labelModal.style.display = 'flex';
     labelModalInput.focus();
   });
@@ -217,7 +213,6 @@
       initialPosition:  initialPosEl.value,
     });
     selectedConnectionLabel = label;
-    connectionLabelEl.value = label;
     labelModal.style.display = 'none';
     await refreshSavedConnections();
   });
@@ -225,13 +220,12 @@
   labelModalInput.addEventListener('keypress', e => { if (e.key === 'Enter') labelModalSave.click(); });
 
   deleteConnectionBtn.addEventListener('click', async () => {
-    const label = connectionLabelEl.value.trim() || selectedConnectionLabel;
+    const label = selectedConnectionLabel;
     if (!label) return;
     if (!confirm(`Delete connection "${label}"?`)) return;
     await storage.deleteConnection(label);
     if (selectedConnectionLabel === label) {
       selectedConnectionLabel = null;
-      connectionLabelEl.value = '';
     }
     await refreshSavedConnections();
   });
@@ -244,7 +238,6 @@
     subscriptionEl.value = 'viewer-sub';
     subTypeEl.value = 'Exclusive';
     initialPosEl.value = 'latest';
-    connectionLabelEl.value = '';
     document.querySelectorAll('.conn-item').forEach(i => i.classList.remove('active'));
   });
 
@@ -330,9 +323,11 @@
     } else if (type === 'stats') {
       statsBar.style.display = 'flex';
       const newCount = data.totalMessages;
+      const oldRawCount = lastRawBackendCount;
 
-      if (!initialPageLoaded && newCount > 0 && !isSearchActive) {
-        fetchAndRenderPage(0);
+      if (shouldLoadInitialPage({ initialPageLoaded, newRawCount: newCount })) {
+        if (isSearchActive) performSearch(filterEl.value, useRegexEl.checked, currentPage);
+        else fetchAndRenderPage(0);
         initialPageLoaded = true;
       }
       if (data.streamClosed) {
@@ -340,13 +335,28 @@
         handleStreamClose(true);
         return;
       }
-      if (newCount > previousBackendCount && connectionId && !isSearchActive && currentPage !== 0) {
+      // Keep the currently visible page/search results live as new messages arrive.
+      // For the normal (non-search) view, only refresh when the user is looking at the
+      // tail page — the page that would actually receive newly appended messages —
+      // so browsing an older page isn't disrupted.
+      const refreshDecision = decideLiveRefresh({
+        oldRawCount, newRawCount: newCount, currentPage, isSearchActive, messagesPerPage: MESSAGES_PER_PAGE
+      });
+      if (refreshDecision.shouldRefresh && connectionId) {
         pendingPageRefresh = true;
         if (pageRefreshTimer) clearTimeout(pageRefreshTimer);
         pageRefreshTimer = setTimeout(() => {
-          if (pendingPageRefresh) { fetchAndRenderPage(currentPage); pendingPageRefresh = false; }
+          if (!pendingPageRefresh) return;
+          pendingPageRefresh = false;
+          if (refreshDecision.kind === 'search') {
+            performSearch(filterEl.value, useRegexEl.checked, currentPage);
+          } else {
+            fetchAndRenderPage(currentPage);
+          }
         }, 500);
       }
+      lastRawBackendCount = newCount;
+
       if (!isSearchActive) {
         totalBackendMessages = newCount;
         previousBackendCount = newCount;
@@ -382,6 +392,7 @@
     try { await fetch(`${API_BASE}/api/disconnect`, { method: 'POST' }); } catch {}
     totalBackendMessages = 0;
     previousBackendCount = 0;
+    lastRawBackendCount = 0;
     currentPage = 0;
     isSearchActive = false;
   }
@@ -531,15 +542,14 @@
 
   function buildMessageEl(msg) {
     const container = document.createElement('div');
-    container.className = 'msg msg-message msg-clickable';
+    container.className = 'msg msg-message msg-clickable msg-expanded';
     container.dataset.msgId = msg.id || '';
 
     const meta = document.createElement('div');
     meta.className = 'msg-meta';
-    meta.innerHTML = `<span class="msg-icon msg-icon-message">▶</span>
+    meta.innerHTML = `<span class="msg-icon msg-icon-message">▼</span>
       <span class="msg-time">${msg.publishTime ? new Date(msg.publishTime).toLocaleTimeString() : ''}</span>
-      ${msg.key ? `<span class="msg-key">${msg.key}</span>` : ''}
-      <span class="msg-hint">click to inspect</span>`;
+      ${msg.key ? `<span class="msg-key">${msg.key}</span>` : ''}`;
 
     const body = document.createElement('div');
     body.className = 'msg-body';
@@ -568,11 +578,20 @@
     container.appendChild(meta);
     container.appendChild(body);
 
-    container.addEventListener('click', () => {
-      container.classList.toggle('msg-expanded');
+    // Only the header row toggles expand/collapse, so clicking inside the
+    // payload or properties (e.g. to select/copy text) never collapses it.
+    meta.addEventListener('click', () => {
+      const expanded = container.classList.toggle('msg-expanded');
+      meta.querySelector('.msg-icon-message').textContent = expanded ? '▼' : '▶';
     });
 
     return container;
+  }
+
+  function collapseMessageEl(el) {
+    el.classList.remove('msg-expanded');
+    const icon = el.querySelector('.msg-icon-message');
+    if (icon) icon.textContent = '▶';
   }
 
   function renderMessages(msgs) {
@@ -583,10 +602,12 @@
       if (id) existingById.set(id, el);
     });
 
-    const expandedIds = new Set();
+    // Messages default to expanded, so we only need to remember the ones the
+    // user explicitly collapsed to preserve that state across re-renders.
+    const collapsedIds = new Set();
     existingEls.forEach(el => {
-      if (el.classList.contains('msg-expanded') && el.dataset.msgId) {
-        expandedIds.add(el.dataset.msgId);
+      if (!el.classList.contains('msg-expanded') && el.dataset.msgId) {
+        collapsedIds.add(el.dataset.msgId);
       }
     });
 
@@ -599,7 +620,7 @@
       const fragment = document.createDocumentFragment();
       msgs.forEach(msg => {
         const el = buildMessageEl(msg);
-        if (msg.id && expandedIds.has(msg.id)) el.classList.add('msg-expanded');
+        if (msg.id && collapsedIds.has(msg.id)) collapseMessageEl(el);
         fragment.appendChild(el);
       });
       messagesEl.innerHTML = '';
@@ -627,7 +648,6 @@
         lastEl = existing;
       } else {
         const el = buildMessageEl(msg);
-        if (id && expandedIds.has(id)) el.classList.add('msg-expanded');
         if (lastEl) {
           lastEl.insertAdjacentElement('afterend', el);
         } else {
@@ -701,6 +721,10 @@
       messagesEl.innerHTML = '';
       totalBackendMessages = 0;
       previousBackendCount = 0;
+      lastRawBackendCount = 0;
+      initialPageLoaded = false;
+      if (pageRefreshTimer) { clearTimeout(pageRefreshTimer); pageRefreshTimer = null; }
+      pendingPageRefresh = false;
       currentPage = 0;
       isSearchActive = false;
       filterEl.value = '';
@@ -1522,22 +1546,28 @@
   // ─── Protobuf Schema ─────────────────────────────────────────────────────
   let protoActive = false;
   let protoFileContent = null;
+  let protoMsgTypeOptions = [];
+  let protoSelectedMsgType = '';
 
-  const protoArrow = document.getElementById('proto-arrow');
-  const protoSectionBody = document.getElementById('proto-section-body');
   const protoSourceEl = document.getElementById('protoSource');
   const protoMsgTypeRow = document.getElementById('protoMsgTypeRow');
-  const protoMsgTypeEl = document.getElementById('protoMsgType');
+  const protoMsgTypeInput = document.getElementById('protoMsgTypeInput');
+  const protoMsgTypeDropdown = document.getElementById('protoMsgTypeDropdown');
   const protoRegisterBtn = document.getElementById('protoRegisterBtn');
   const protoClearBtn = document.getElementById('protoClearBtn');
   const protoStatusEl = document.getElementById('protoStatus');
   const protoEncodeBadge = document.getElementById('protoEncodeBadge');
   const protoSendOptions = document.getElementById('protoSendOptions');
   const sendAsProtobufEl = document.getElementById('sendAsProtobuf');
+  const protoSchemaModal = document.getElementById('protoSchemaModal');
+  const protoSchemaBtn = document.getElementById('protoSchemaBtn');
+  const protoSchemaBadge = document.getElementById('protoSchemaBadge');
 
-  document.getElementById('proto-section-toggle').addEventListener('click', () => {
-    const collapsed = protoSectionBody.classList.toggle('collapsed');
-    protoArrow.textContent = collapsed ? '\u25B8' : '\u25BE';
+  // The modal can be opened at any time — including while connected — so
+  // the schema can be swapped without restarting the app.
+  protoSchemaBtn.addEventListener('click', () => { protoSchemaModal.style.display = 'flex'; });
+  document.getElementById('protoSchemaModalClose').addEventListener('click', () => {
+    protoSchemaModal.style.display = 'none';
   });
 
   // Proto tab switching (Paste / File)
@@ -1580,6 +1610,42 @@
     reader.readAsText(file);
   }
 
+  // Searchable, alphabetically-sorted message type combobox.
+  function renderProtoMsgTypeOptions(filterText) {
+    const q = (filterText || '').toLowerCase();
+    const matches = protoMsgTypeOptions.filter(t => t.toLowerCase().includes(q));
+    protoMsgTypeDropdown.innerHTML = matches.length
+      ? matches.map(t => `<div class="combo-option${t === protoSelectedMsgType ? ' active' : ''}" data-value="${t}">${t}</div>`).join('')
+      : '<div class="combo-empty">No matches</div>';
+    protoMsgTypeDropdown.style.display = 'block';
+  }
+
+  function selectProtoMsgType(type) {
+    protoMsgTypeDropdown.style.display = 'none';
+    if (type === protoSelectedMsgType) return;
+    protoSelectedMsgType = type;
+    protoMsgTypeInput.value = type;
+    reRegisterWithMsgType(type);
+  }
+
+  protoMsgTypeInput.addEventListener('focus', () => renderProtoMsgTypeOptions(protoMsgTypeInput.value));
+  protoMsgTypeInput.addEventListener('input', () => renderProtoMsgTypeOptions(protoMsgTypeInput.value));
+  protoMsgTypeInput.addEventListener('blur', () => {
+    // Delay so a click on a dropdown option registers before it is hidden.
+    setTimeout(() => { protoMsgTypeDropdown.style.display = 'none'; }, 150);
+  });
+  protoMsgTypeDropdown.addEventListener('mousedown', e => {
+    const opt = e.target.closest('.combo-option');
+    if (opt) selectProtoMsgType(opt.dataset.value);
+  });
+
+  function setProtoMsgTypeOptions(types, selected) {
+    protoMsgTypeOptions = [...types].sort((a, b) => a.localeCompare(b));
+    protoSelectedMsgType = selected || '';
+    protoMsgTypeInput.value = protoSelectedMsgType;
+    protoMsgTypeRow.style.display = '';
+  }
+
   protoRegisterBtn.addEventListener('click', registerProtoSchema);
 
   async function registerProtoSchema() {
@@ -1599,7 +1665,7 @@
       const res = await fetch(`${API_BASE}/api/proto/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source, messageType: protoMsgTypeEl.value || '' }),
+        body: JSON.stringify({ source, messageType: protoSelectedMsgType || '' }),
       });
       const data = await res.json();
       if (!res.ok || data.error) {
@@ -1610,16 +1676,14 @@
 
       const types = data.messageTypes || [];
       if (types.length > 1 && !data.selected) {
-        protoMsgTypeEl.innerHTML = types.map(t => `<option value="${t}">${t}</option>`).join('');
-        protoMsgTypeRow.style.display = '';
+        setProtoMsgTypeOptions(types, '');
         protoStatusEl.textContent = `Found ${types.length} message types. Select one and register again.`;
         protoStatusEl.className = 'proto-status proto-status-info';
         return;
       }
 
       if (types.length > 1) {
-        protoMsgTypeEl.innerHTML = types.map(t => `<option value="${t}" ${t === data.selected ? 'selected' : ''}>${t}</option>`).join('');
-        protoMsgTypeRow.style.display = '';
+        setProtoMsgTypeOptions(types, data.selected);
       }
 
       setProtoActive(true, data.selected);
@@ -1633,7 +1697,7 @@
     }
   }
 
-  protoMsgTypeEl.addEventListener('change', async () => {
+  async function reRegisterWithMsgType(type) {
     if (!protoActive) return;
     const source = protoSourceEl.value.trim() || protoFileContent;
     if (!source) return;
@@ -1641,15 +1705,16 @@
       const res = await fetch(`${API_BASE}/api/proto/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source, messageType: protoMsgTypeEl.value }),
+        body: JSON.stringify({ source, messageType: type }),
       });
       const data = await res.json();
       if (data.ok && data.selected) {
+        setProtoActive(true, data.selected);
         protoStatusEl.textContent = `Active: ${data.selected}`;
         protoStatusEl.className = 'proto-status proto-status-ok';
       }
     } catch {}
-  });
+  }
 
   protoClearBtn.addEventListener('click', async () => {
     try { await fetch(`${API_BASE}/api/proto/clear`, { method: 'POST' }); } catch {}
@@ -1665,8 +1730,10 @@
     protoClearBtn.style.display = active ? '' : 'none';
     protoEncodeBadge.style.display = active ? '' : 'none';
     protoSendOptions.style.display = active ? '' : 'none';
+    protoSchemaBadge.style.display = active ? '' : 'none';
     if (active) {
       protoEncodeBadge.textContent = typeName || 'protobuf';
+      protoSchemaBadge.textContent = typeName || 'active';
     }
   }
 
@@ -1812,15 +1879,29 @@
     return config;
   }
 
-  function exportConfig() {
+  async function exportConfig() {
     const config = gatherConfig();
     const connCount = Object.keys(config.connections).length;
     const tmplCount = Object.values(config.templates).reduce((sum, t) => sum + Object.keys(t).length, 0);
+    const content = JSON.stringify(config, null, 2);
+    const defaultName = `pulsarviewer-config-${new Date().toISOString().slice(0, 10)}.json`;
 
-    const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
+    if (window.__TAURI__) {
+      // Native "Save As" dialog so the user can pick where to save the file.
+      try {
+        const savedPath = await window.__TAURI__.invoke('save_export_file', { defaultName, content });
+        if (!savedPath) return; // user cancelled
+        addConsumerMessage('info', `Exported config to ${savedPath}: ${connCount} connection(s), ${tmplCount} template(s).`);
+      } catch (e) {
+        addConsumerMessage('error', 'Failed to export config: ' + e);
+      }
+      return;
+    }
+
+    const blob = new Blob([content], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `pulsarviewer-config-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = defaultName;
     a.click();
     URL.revokeObjectURL(a.href);
 
@@ -2037,8 +2118,7 @@
         protoStatusEl.className = 'proto-status proto-status-ok';
         if (data.source) protoSourceEl.value = data.source;
         if (data.messageTypes && data.messageTypes.length > 1) {
-          protoMsgTypeEl.innerHTML = data.messageTypes.map(t => `<option value="${t}" ${t === data.messageType ? 'selected' : ''}>${t}</option>`).join('');
-          protoMsgTypeRow.style.display = '';
+          setProtoMsgTypeOptions(data.messageTypes, data.messageType);
         }
       }
     } catch {}

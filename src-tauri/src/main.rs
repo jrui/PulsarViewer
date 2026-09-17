@@ -12,9 +12,29 @@ fn main() {
     start_backend();
 
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![])
+        .invoke_handler(tauri::generate_handler![save_export_file])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// Opens a native "Save As" dialog and writes `content` to the chosen path.
+/// Returns the saved file path, or an empty string if the user cancelled.
+#[tauri::command]
+fn save_export_file(default_name: String, content: String) -> Result<String, String> {
+    use tauri::api::dialog::blocking::FileDialogBuilder;
+
+    let path = FileDialogBuilder::new()
+        .set_file_name(&default_name)
+        .add_filter("JSON", &["json"])
+        .save_file();
+
+    match path {
+        Some(path) => {
+            std::fs::write(&path, content).map_err(|e| e.to_string())?;
+            Ok(path.to_string_lossy().to_string())
+        }
+        None => Ok(String::new()),
+    }
 }
 
 #[cfg(not(debug_assertions))]
