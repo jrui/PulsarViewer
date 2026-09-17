@@ -26,6 +26,10 @@
       "process": {
         "all": false,
         "relaunch": true
+      },
+      "dialog": {
+        "all": false,
+        "save": true
       }
     },
     "bundle": {

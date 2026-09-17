@@ -50,56 +50,14 @@
           </div>
           <div class="connection-actions">
             <button id="connectBtn" class="btn-primary">Connect</button>
-            <button id="disconnectBtn" class="btn-danger" disabled>Disconnect</button>
-          </div>
-          <div class="connection-save-row">
-            <input type="text" id="connectionLabel" placeholder="Connection name..." />
+            <button id="disconnectBtn" class="btn-danger" style="display:none;">Disconnect</button>
             <button id="saveConnectionBtn" class="btn-secondary" title="Save connection">Save</button>
             <button id="deleteConnectionBtn" class="btn-ghost-danger" title="Delete selected">Delete</button>
           </div>
         </div>
-
-        <div id="connection-status" class="status-disconnected">
-          <span id="status-dot" class="dot"></span>
-          <span id="status-text">Disconnected</span>
-        </div>
       </div>
 
-      <!-- Protobuf Schema Section -->
-      <div id="proto-panel">
-        <div class="sidebar-section-title proto-section-header" id="proto-section-toggle">
-          <span>Protobuf Schema</span>
-          <span class="proto-toggle-arrow" id="proto-arrow">▸</span>
-        </div>
-        <div id="proto-section-body" class="proto-section-body collapsed">
-          <div class="proto-controls">
-            <div class="proto-tab-row">
-              <button class="proto-tab active" data-proto-tab="paste" id="protoTabPaste">Paste</button>
-              <button class="proto-tab" data-proto-tab="file" id="protoTabFile">File</button>
-            </div>
-            <div id="proto-paste-panel" class="proto-input-panel">
-              <textarea id="protoSource" rows="6" placeholder="syntax = &quot;proto3&quot;;&#10;&#10;message MyMessage {&#10;  string name = 1;&#10;  int32 id = 2;&#10;}" class="proto-textarea"></textarea>
-            </div>
-            <div id="proto-file-panel" class="proto-input-panel" style="display:none;">
-              <div class="proto-file-drop" id="protoFileDrop">
-                <span class="proto-file-icon">&#128196;</span>
-                <span class="proto-file-label">Drop .proto file or click to browse</span>
-                <input type="file" id="protoFileInput" accept=".proto" style="display:none;" />
-              </div>
-              <div id="protoFileName" class="proto-file-name"></div>
-            </div>
-            <div class="form-row" id="protoMsgTypeRow" style="display:none;">
-              <label>Message Type</label>
-              <select id="protoMsgType" class="toolbar-select"></select>
-            </div>
-            <div class="proto-action-row">
-              <button id="protoRegisterBtn" class="btn-primary btn-sm">Register Schema</button>
-              <button id="protoClearBtn" class="btn-ghost-danger btn-sm" style="display:none;">Clear</button>
-            </div>
-            <div id="protoStatus" class="proto-status"></div>
-          </div>
-        </div>
-      </div>
+
 
       <div id="sidebar-footer">
         <div class="config-actions">
@@ -169,6 +127,11 @@
           <div class="toolbar-group toolbar-group-right">
             <input id="filter" placeholder="Filter messages..." class="toolbar-input filter-input" />
             <label class="checkbox-label"><input type="checkbox" id="useRegex" /> Regex</label>
+            <button id="protoSchemaBtn" class="btn-sm btn-ghost" title="Configure protobuf schema for decoding">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+              Protobuf
+              <span id="protoSchemaBadge" class="proto-badge" style="display:none;"></span>
+            </button>
             <button id="exportCsvBtn" class="btn-sm btn-secondary">Export CSV</button>
             <button id="clearBtn" class="btn-sm btn-danger-outline">Clear</button>
           </div>
@@ -287,7 +250,7 @@
                 <span id="mgmt-topic-name" class="topic-chip"></span>
                 <button id="refreshStatsBtn" class="btn-sm btn-ghost">↻ Refresh</button>
                 <div class="autorefresh-controls">
-                  <button id="autorefresh-toggle" class="btn-sm btn-ghost active" title="Toggle auto-refresh">
+                  <button id="autorefresh-toggle" class="btn-sm btn-ghost" title="Toggle auto-refresh">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                   </button>
                   <select id="autorefresh-interval" class="toolbar-select autorefresh-select">
@@ -297,7 +260,7 @@
                     <option value="30">30s</option>
                     <option value="60">60s</option>
                   </select>
-                  <span id="autorefresh-badge" class="autorefresh-badge">Auto-refresh: 10s</span>
+                  <span id="autorefresh-badge" class="autorefresh-badge">Auto-refresh: off</span>
                 </div>
               </div>
 
@@ -401,6 +364,45 @@
     </div>
   </div>
 
+  <!-- Protobuf Schema Modal -->
+  <div id="protoSchemaModal" class="modal-overlay" style="display:none;">
+    <div class="modal-box modal-wide">
+      <div class="modal-title-row">
+        <h3>Protobuf Schema</h3>
+        <button id="protoSchemaModalClose" class="toast-close" style="font-size:20px;">×</button>
+      </div>
+      <div class="proto-controls">
+        <div class="proto-tab-row">
+          <button class="proto-tab active" data-proto-tab="paste" id="protoTabPaste">Paste</button>
+          <button class="proto-tab" data-proto-tab="file" id="protoTabFile">File</button>
+        </div>
+        <div id="proto-paste-panel" class="proto-input-panel">
+          <textarea id="protoSource" rows="6" placeholder="syntax = &quot;proto3&quot;;&#10;&#10;message MyMessage {&#10;  string name = 1;&#10;  int32 id = 2;&#10;}" class="proto-textarea"></textarea>
+        </div>
+        <div id="proto-file-panel" class="proto-input-panel" style="display:none;">
+          <div class="proto-file-drop" id="protoFileDrop">
+            <span class="proto-file-icon">&#128196;</span>
+            <span class="proto-file-label">Drop .proto file or click to browse</span>
+            <input type="file" id="protoFileInput" accept=".proto" style="display:none;" />
+          </div>
+          <div id="protoFileName" class="proto-file-name"></div>
+        </div>
+        <div class="form-row" id="protoMsgTypeRow" style="display:none;">
+          <label>Message Type</label>
+          <div class="combo" id="protoMsgTypeCombo">
+            <input type="text" id="protoMsgTypeInput" class="toolbar-input" placeholder="Search message type..." autocomplete="off" />
+            <div id="protoMsgTypeDropdown" class="combo-dropdown" style="display:none;"></div>
+          </div>
+        </div>
+        <div class="proto-action-row">
+          <button id="protoRegisterBtn" class="btn-primary btn-sm">Register Schema</button>
+          <button id="protoClearBtn" class="btn-ghost-danger btn-sm" style="display:none;">Clear</button>
+        </div>
+        <div id="protoStatus" class="proto-status"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Save Connection Modal -->
   <div id="labelModal" class="modal-overlay" style="display:none;">
     <div class="modal-box">
@@ -459,6 +461,7 @@
     </div>
   </div>
 
+  <script src="live-refresh.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

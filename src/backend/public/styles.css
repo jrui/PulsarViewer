@@ -239,45 +239,19 @@ body.app-ready {
 
 .connection-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 8px;
 }
-
-.connection-save-row {
-  display: flex;
-  gap: 4px;
-  align-items: center;
+.connection-actions #connectBtn,
+.connection-actions #disconnectBtn {
+  flex: 1 1 auto;
+  min-width: 90px;
 }
-
-.connection-save-row input {
-  flex: 1;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text-primary);
-  font-size: 11px;
-  padding: 4px 6px;
-  outline: none;
+.connection-actions #saveConnectionBtn,
+.connection-actions #deleteConnectionBtn {
+  flex: 0 0 auto;
 }
-.connection-save-row input:focus { border-color: var(--accent); }
-
-/* Connection Status */
-#connection-status {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 14px;
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-.dot {
-  width: 7px; height: 7px;
-  border-radius: 50%;
-  background: var(--error);
-  flex-shrink: 0;
-}
-.dot-connected { background: var(--success); box-shadow: 0 0 6px var(--success); }
 
 /* Sidebar footer */
 #sidebar-footer {
@@ -633,21 +607,9 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .json-null { color: #999; }
 
 /* ─── Message detail panel (expandable) ───────────────────────────────────── */
-.msg-clickable { cursor: pointer; transition: border-color 150ms; }
 .msg-clickable:hover { border-color: var(--accent); }
 .msg-clickable.msg-expanded { border-color: var(--accent); }
-
-.msg-hint {
-  font-size: 9px;
-  color: var(--text-muted);
-  font-style: italic;
-  margin-left: auto;
-  white-space: nowrap;
-  opacity: 0.7;
-  transition: opacity 150ms;
-}
-.msg-clickable:hover .msg-hint { opacity: 1; }
-.msg-expanded .msg-hint { display: none; }
+.msg-clickable .msg-meta { cursor: pointer; }
 
 .msg-body {
   display: flex;
@@ -1297,37 +1259,9 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 .toast-close:hover { color: var(--text-primary); }
 
-/* ─── Protobuf Schema Panel ──────────────────────────────────────────────── */
-#proto-panel {
-  border-top: 1px solid var(--border);
-}
-
-.proto-section-header {
-  cursor: pointer;
-  user-select: none;
-}
-.proto-section-header:hover {
-  color: var(--text-secondary);
-}
-
-.proto-toggle-arrow {
-  font-size: 10px;
-  color: var(--text-muted);
-  transition: transform 150ms;
-}
-
-.proto-section-body {
-  padding: 6px 12px 10px;
-  overflow: hidden;
-  transition: max-height 200ms ease, opacity 200ms ease;
-  max-height: 600px;
-  opacity: 1;
-}
-.proto-section-body.collapsed {
-  max-height: 0;
-  opacity: 0;
-  padding: 0 12px;
-  pointer-events: none;
+/* ─── Protobuf Schema Panel (now hosted in a modal) ─────────────────────── */
+.proto-controls {
+  padding-top: 4px;
 }
 
 .proto-tab-row {
@@ -1435,6 +1369,49 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .proto-status-ok { color: var(--success); }
 .proto-status-error { color: var(--error); }
 .proto-status-info { color: var(--text-muted); }
+
+.combo {
+  position: relative;
+}
+
+.combo-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  z-index: 20;
+}
+
+.combo-option {
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.combo-option:hover, .combo-option.active {
+  background: rgba(88, 157, 246, 0.15);
+}
+
+.combo-empty {
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+#protoSchemaBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+#protoSchemaBtn svg { flex-shrink: 0; }
 
 .proto-badge {
   display: inline-block;
