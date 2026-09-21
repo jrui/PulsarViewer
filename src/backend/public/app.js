@@ -2,30 +2,51 @@
   // In Tauri desktop app, frontend is served by the app; API runs on localhost:3000
   const API_BASE = (typeof window !== 'undefined' && window.__TAURI__) ? 'http://localhost:3000' : '';
   const { decideLiveRefresh, shouldLoadInitialPage } = window.PulsarViewerLiveRefresh;
+  const ConnTree = window.PulsarViewerConnectionsTree;
 
   // ─── Storage ────────────────────────────────────────────────────────────────
+  // Saved connections are kept as a single-level tree of folders + connections
+  // (see connections-tree.js) under the same 'pulsarConnections' localStorage
+  // key that used to hold a flat {label: data} map. Legacy flat data is
+  // migrated in-memory (and re-persisted) the first time it's loaded.
   const storage = {
     isElectron: !!(window.electron && window.electron.saveConnection),
+    async loadTree() {
+      if (this.isElectron) {
+        // Legacy Electron bridge only knows flat labels; wrap them as root-level nodes.
+        const labels = await window.electron.loadConnections();
+        const tree = ConnTree.createEmptyTree();
+        for (const label of labels) {
+          const data = await window.electron.loadConnection(label);
+          tree.root.push({ type: 'connection', id: ConnTree.generateId('c'), label, data: data || {} });
+        }
+        return tree;
+      }
+      return ConnTree.normalizeStoredData(JSON.parse(localStorage.getItem('pulsarConnections') || 'null'));
+    },
+    async saveTree(tree) {
+      if (this.isElectron) return; // Electron path has no folder concept; individual ops below cover it.
+      localStorage.setItem('pulsarConnections', JSON.stringify(tree));
+    },
     async saveConnection(label, data) {
       if (this.isElectron) return window.electron.saveConnection(label, data);
-      const c = JSON.parse(localStorage.getItem('pulsarConnections') || '{}');
-      c[label] = data;
-      localStorage.setItem('pulsarConnections', JSON.stringify(c));
+      const tree = await this.loadTree();
+      await this.saveTree(ConnTree.upsertConnection(tree, label, data));
       return { success: true };
     },
     async loadConnections() {
       if (this.isElectron) return window.electron.loadConnections();
-      return Object.keys(JSON.parse(localStorage.getItem('pulsarConnections') || '{}'));
+      return ConnTree.getAllConnectionLabels(await this.loadTree());
     },
     async loadConnection(label) {
       if (this.isElectron) return window.electron.loadConnection(label);
-      return JSON.parse(localStorage.getItem('pulsarConnections') || '{}')[label] || null;
+      const found = ConnTree.findConnectionByLabel(await this.loadTree(), label);
+      return found ? found.node.data : null;
     },
     async deleteConnection(label) {
       if (this.isElectron) return window.electron.deleteConnection(label);
-      const c = JSON.parse(localStorage.getItem('pulsarConnections') || '{}');
-      delete c[label];
-      localStorage.setItem('pulsarConnections', JSON.stringify(c));
+      const tree = await this.loadTree();
+      await this.saveTree(ConnTree.removeConnectionByLabel(tree, label));
       return { success: true };
     },
   };
@@ -46,6 +67,12 @@
   let currentFilterValue = '';
   let currentUseRegex = false;
   let selectedConnectionLabel = null;
+  let currentConnectionsTree = ConnTree.createEmptyTree(); // last-rendered sidebar tree, used for drag-and-drop index math
+  let expandedFolderIds = new Set(JSON.parse(localStorage.getItem('pv_expanded_folders') || '[]'));
+  let draggedNodeId = null;
+  let draggedNodeType = null; // 'connection' | 'folder'
+  let labelModalMode = 'save-connection'; // 'save-connection' | 'rename-connection' | 'rename-folder' | 'new-folder'
+  let labelModalTargetId = null; // node id for rename-* modes
   let selectedTopic = null; // for management tab
   let managementAutoRefreshTimer = null;
   let managementAutoRefreshEnabled = false;
@@ -75,7 +102,9 @@
   const saveConnectionBtn = document.getElementById('saveConnectionBtn');
   const deleteConnectionBtn = document.getElementById('deleteConnectionBtn');
   const savedConnectionsListEl = document.getElementById('saved-connections-list');
+  const newFolderBtn    = document.getElementById('newFolderBtn');
   const labelModal      = document.getElementById('labelModal');
+  const labelModalTitle = labelModal.querySelector('h3');
   const labelModalInput = document.getElementById('labelModalInput');
   const labelModalSave  = document.getElementById('labelModalSave');
   const labelModalCancel = document.getElementById('labelModalCancel');
@@ -157,26 +186,123 @@
   authToastClose.addEventListener('click', () => { authToast.style.display = 'none'; });
 
   // ─── Saved connections sidebar ───────────────────────────────────────────────
+  function escapeHtml(str) {
+    return String(str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  function persistExpandedFolders() {
+    localStorage.setItem('pv_expanded_folders', JSON.stringify([...expandedFolderIds]));
+  }
+
+  function migrateConnectionTemplates(oldLabel, newLabel) {
+    if (oldLabel === newLabel) return;
+    const oldKey = `pvTemplates_${oldLabel}`;
+    const stored = localStorage.getItem(oldKey);
+    if (stored === null) return;
+    localStorage.setItem(`pvTemplates_${newLabel}`, stored);
+    localStorage.removeItem(oldKey);
+  }
+
   async function refreshSavedConnections() {
-    const labels = await storage.loadConnections();
+    currentConnectionsTree = await storage.loadTree();
     savedConnectionsListEl.innerHTML = '';
 
-    if (labels.length === 0) {
+    if (currentConnectionsTree.root.length === 0) {
       savedConnectionsListEl.innerHTML = '<div class="conn-empty">No saved connections</div>';
       return;
     }
 
-    labels.forEach(label => {
-      const item = document.createElement('div');
-      item.className = 'conn-item' + (label === selectedConnectionLabel ? ' active' : '');
-      item.dataset.label = label;
-      item.innerHTML = `
-        <span class="conn-icon">⬡</span>
-        <span class="conn-name">${label}</span>
-      `;
-      item.addEventListener('click', () => loadConnectionIntoForm(label));
-      savedConnectionsListEl.appendChild(item);
+    currentConnectionsTree.root.forEach(node => {
+      const el = node.type === 'folder' ? renderFolderNode(node) : renderConnectionNode(node, null);
+      savedConnectionsListEl.appendChild(el);
     });
+  }
+
+  function renderConnectionNode(node, parentId) {
+    const item = document.createElement('div');
+    item.className = 'conn-item' + (node.label === selectedConnectionLabel ? ' active' : '');
+    item.dataset.id = node.id;
+    item.dataset.type = 'connection';
+    item.dataset.parent = parentId || '';
+    item.draggable = true;
+    item.innerHTML = `
+      <span class="conn-icon">⬡</span>
+      <span class="conn-name">${escapeHtml(node.label)}</span>
+      <span class="conn-item-actions">
+        <button type="button" class="icon-btn conn-rename-btn" title="Rename connection">✎</button>
+      </span>
+    `;
+    item.addEventListener('click', (e) => {
+      if (e.target.closest('.conn-rename-btn')) return;
+      loadConnectionIntoForm(node.label);
+    });
+    item.querySelector('.conn-rename-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      openLabelModal('rename-connection', { targetId: node.id, initialValue: node.label });
+    });
+    attachDragHandlers(item, node, parentId);
+    return item;
+  }
+
+  function renderFolderNode(node) {
+    const expanded = expandedFolderIds.has(node.id);
+    const wrapper = document.createElement('div');
+    wrapper.className = 'folder-item';
+
+    const header = document.createElement('div');
+    header.className = 'folder-header';
+    header.dataset.id = node.id;
+    header.dataset.type = 'folder';
+    header.dataset.parent = '';
+    header.draggable = true;
+    header.innerHTML = `
+      <span class="folder-chevron">${expanded ? '▾' : '▸'}</span>
+      <span class="folder-icon">📁</span>
+      <span class="folder-name">${escapeHtml(node.name)}</span>
+      <span class="folder-count">${node.children.length}</span>
+      <span class="conn-item-actions">
+        <button type="button" class="icon-btn folder-rename-btn" title="Rename folder">✎</button>
+        <button type="button" class="icon-btn folder-delete-btn" title="Delete folder">🗑</button>
+      </span>
+    `;
+    header.addEventListener('click', (e) => {
+      if (e.target.closest('.folder-rename-btn') || e.target.closest('.folder-delete-btn')) return;
+      if (expandedFolderIds.has(node.id)) expandedFolderIds.delete(node.id);
+      else expandedFolderIds.add(node.id);
+      persistExpandedFolders();
+      refreshSavedConnections();
+    });
+    header.querySelector('.folder-rename-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      openLabelModal('rename-folder', { targetId: node.id, initialValue: node.name });
+    });
+    header.querySelector('.folder-delete-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      confirmDeleteFolder(node);
+    });
+    attachDragHandlers(header, node, null);
+
+    const childrenEl = document.createElement('div');
+    childrenEl.className = 'folder-children' + (expanded ? '' : ' collapsed');
+    if (node.children.length === 0) {
+      childrenEl.innerHTML = '<div class="conn-empty folder-empty">Drop connections here</div>';
+    } else {
+      node.children.forEach(child => childrenEl.appendChild(renderConnectionNode(child, node.id)));
+    }
+    attachContainerDropZone(childrenEl, node.id);
+
+    wrapper.appendChild(header);
+    wrapper.appendChild(childrenEl);
+    return wrapper;
+  }
+
+  async function confirmDeleteFolder(node) {
+    const count = node.children.length;
+    const contents = count === 0 ? 'It is empty.' : `Its ${count} connection${count === 1 ? '' : 's'} will be moved back to the top level (not deleted).`;
+    if (!confirm(`Delete folder "${node.name}"? ${contents}`)) return;
+    const updated = ConnTree.deleteFolder(currentConnectionsTree, node.id, 'promote');
+    await storage.saveTree(updated);
+    await refreshSavedConnections();
   }
 
   async function loadConnectionIntoForm(label) {
@@ -193,26 +319,184 @@
     refreshTemplatesList();
   }
 
-  saveConnectionBtn.addEventListener('click', () => {
-    labelModalInput.value = selectedConnectionLabel || '';
+  // ─── Drag-and-drop reorder / move ───────────────────────────────────────────
+  function getContainerNodes(tree, parentId) {
+    if (!parentId) return tree.root;
+    const folder = tree.root.find(n => n.type === 'folder' && n.id === parentId);
+    return folder ? folder.children : [];
+  }
+
+  function indexInContainer(tree, parentId, nodeId) {
+    return getContainerNodes(tree, parentId).findIndex(n => n.id === nodeId);
+  }
+
+  function clearDropIndicators() {
+    savedConnectionsListEl.querySelectorAll('.drag-over-before, .drag-over-after, .drag-over-inside')
+      .forEach(el => el.classList.remove('drag-over-before', 'drag-over-after', 'drag-over-inside'));
+  }
+
+  async function performMove(nodeId, targetParentId, targetIndex) {
+    const updated = ConnTree.moveNode(currentConnectionsTree, nodeId, targetParentId, targetIndex);
+    await storage.saveTree(updated);
+    await refreshSavedConnections();
+  }
+
+  function handleDropOnNode(nodeId, targetNode, targetParentId, position) {
+    if (position === 'inside') {
+      const container = getContainerNodes(currentConnectionsTree, targetNode.id);
+      performMove(nodeId, targetNode.id, container.length);
+      return;
+    }
+    const idx = indexInContainer(currentConnectionsTree, targetParentId, targetNode.id);
+    performMove(nodeId, targetParentId || null, position === 'before' ? idx : idx + 1);
+  }
+
+  // Folders are single-level: they may only reorder among themselves at the
+  // root, and never accept another folder as a child.
+  function attachDragHandlers(el, node, parentId) {
+    el.addEventListener('dragstart', (e) => {
+      draggedNodeId = node.id;
+      draggedNodeType = node.type;
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', node.id);
+      el.classList.add('dragging');
+    });
+    el.addEventListener('dragend', () => {
+      el.classList.remove('dragging');
+      clearDropIndicators();
+      draggedNodeId = null;
+      draggedNodeType = null;
+    });
+    el.addEventListener('dragover', (e) => {
+      if (!draggedNodeId || draggedNodeId === node.id) return;
+      if (draggedNodeType === 'folder' && parentId) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const rect = el.getBoundingClientRect();
+      const offsetY = e.clientY - rect.top;
+      const allowInside = node.type === 'folder' && draggedNodeType === 'connection' && !parentId;
+      let position;
+      if (allowInside) {
+        if (offsetY < rect.height * 0.25) position = 'before';
+        else if (offsetY > rect.height * 0.75) position = 'after';
+        else position = 'inside';
+      } else {
+        position = offsetY < rect.height / 2 ? 'before' : 'after';
+      }
+      clearDropIndicators();
+      el.classList.add('drag-over-' + position);
+      el.dataset.dropPosition = position;
+    });
+    el.addEventListener('drop', (e) => {
+      if (!draggedNodeId || draggedNodeId === node.id) return;
+      if (draggedNodeType === 'folder' && parentId) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const position = el.dataset.dropPosition || 'after';
+      clearDropIndicators();
+      handleDropOnNode(draggedNodeId, node, parentId, position);
+    });
+  }
+
+  // Attached to a root/folder container so dropping on empty space (below the
+  // last item, or into an empty folder) appends to the end of that container.
+  function attachContainerDropZone(containerEl, parentId) {
+    containerEl.addEventListener('dragover', (e) => {
+      if (!draggedNodeId) return;
+      if (draggedNodeType === 'folder' && parentId) return;
+      e.preventDefault();
+    });
+    containerEl.addEventListener('drop', (e) => {
+      if (!draggedNodeId) return;
+      if (draggedNodeType === 'folder' && parentId) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const container = getContainerNodes(currentConnectionsTree, parentId);
+      performMove(draggedNodeId, parentId || null, container.length);
+    });
+  }
+
+  // Root container listeners are attached once; its children are rebuilt via
+  // innerHTML='' on every render, but the container element itself persists.
+  attachContainerDropZone(savedConnectionsListEl, null);
+
+  // ─── Save / rename / new-folder modal ───────────────────────────────────────
+  function openLabelModal(mode, opts = {}) {
+    labelModalMode = mode;
+    labelModalTargetId = opts.targetId || null;
+    const titles = {
+      'save-connection': 'Save Connection',
+      'rename-connection': 'Rename Connection',
+      'rename-folder': 'Rename Folder',
+      'new-folder': 'New Folder',
+    };
+    const placeholders = {
+      'save-connection': 'e.g. Production, Dev Cluster',
+      'rename-connection': 'New connection name',
+      'rename-folder': 'New folder name',
+      'new-folder': 'e.g. Production Clusters',
+    };
+    labelModalTitle.textContent = titles[mode];
+    labelModalInput.placeholder = placeholders[mode];
+    labelModalInput.value = opts.initialValue || '';
     labelModal.style.display = 'flex';
     labelModalInput.focus();
+    labelModalInput.select();
+  }
+
+  saveConnectionBtn.addEventListener('click', () => {
+    openLabelModal('save-connection', { initialValue: selectedConnectionLabel || '' });
+  });
+
+  newFolderBtn.addEventListener('click', () => {
+    openLabelModal('new-folder');
   });
 
   labelModalCancel.addEventListener('click', () => { labelModal.style.display = 'none'; });
 
   labelModalSave.addEventListener('click', async () => {
-    const label = labelModalInput.value.trim();
-    if (!label) { labelModalInput.focus(); return; }
-    await storage.saveConnection(label, {
-      serviceUrl:       serviceUrlEl.value.trim(),
-      topic:            topicEl.value.trim(),
-      token:            tokenEl.value.trim(),
-      subscription:     subscriptionEl.value.trim(),
-      subscriptionType: subTypeEl.value,
-      initialPosition:  initialPosEl.value,
-    });
-    selectedConnectionLabel = label;
+    const value = labelModalInput.value.trim();
+    if (!value) { labelModalInput.focus(); return; }
+    const tree = currentConnectionsTree;
+
+    if (labelModalMode === 'save-connection') {
+      await storage.saveConnection(value, {
+        serviceUrl:       serviceUrlEl.value.trim(),
+        topic:            topicEl.value.trim(),
+        token:            tokenEl.value.trim(),
+        subscription:     subscriptionEl.value.trim(),
+        subscriptionType: subTypeEl.value,
+        initialPosition:  initialPosEl.value,
+      });
+      selectedConnectionLabel = value;
+    } else if (labelModalMode === 'rename-connection') {
+      const found = ConnTree.findNodeById(tree, labelModalTargetId);
+      if (!found) { labelModal.style.display = 'none'; return; }
+      if (value !== found.node.label && ConnTree.connectionLabelExists(tree, value)) {
+        alert(`A connection named "${value}" already exists.`);
+        return;
+      }
+      const oldLabel = found.node.label;
+      const updated = ConnTree.renameConnection(tree, labelModalTargetId, value);
+      await storage.saveTree(updated);
+      migrateConnectionTemplates(oldLabel, value);
+      if (selectedConnectionLabel === oldLabel) selectedConnectionLabel = value;
+    } else if (labelModalMode === 'rename-folder') {
+      if (ConnTree.folderNameExists(tree, value, labelModalTargetId)) {
+        alert(`A folder named "${value}" already exists.`);
+        return;
+      }
+      const updated = ConnTree.renameFolder(tree, labelModalTargetId, value);
+      await storage.saveTree(updated);
+    } else if (labelModalMode === 'new-folder') {
+      if (ConnTree.folderNameExists(tree, value)) {
+        alert(`A folder named "${value}" already exists.`);
+        return;
+      }
+      const updated = ConnTree.createFolder(tree, value);
+      await storage.saveTree(updated);
+    }
+
     labelModal.style.display = 'none';
     await refreshSavedConnections();
   });
@@ -1855,11 +2139,11 @@
     reader.readAsText(file);
   });
 
-  function gatherConfig() {
+  async function gatherConfig() {
     const config = {
-      _pv_config_version: 1,
+      _pv_config_version: 2,
       _pv_exported_at: new Date().toISOString(),
-      connections: JSON.parse(localStorage.getItem('pulsarConnections') || '{}'),
+      connections: await storage.loadTree(),
       templates: {},
       preferences: {},
     };
@@ -1880,8 +2164,8 @@
   }
 
   async function exportConfig() {
-    const config = gatherConfig();
-    const connCount = Object.keys(config.connections).length;
+    const config = await gatherConfig();
+    const connCount = ConnTree.getAllConnectionLabels(config.connections).length;
     const tmplCount = Object.values(config.templates).reduce((sum, t) => sum + Object.keys(t).length, 0);
     const content = JSON.stringify(config, null, 2);
     const defaultName = `pulsarviewer-config-${new Date().toISOString().slice(0, 10)}.json`;
@@ -1908,7 +2192,12 @@
     addConsumerMessage('info', `Exported config: ${connCount} connection(s), ${tmplCount} template(s).`);
   }
 
-  function importConfig(jsonStr) {
+  // Accepts both the legacy (v1, flat `{label: data}` map under `connections`)
+  // and current (v2, folder tree under `connections`) config export formats —
+  // `ConnTree.normalizeStoredData` auto-detects which shape it received by
+  // structure, not by trusting `_pv_config_version`, so old exports still
+  // import cleanly (all connections land at the root).
+  async function importConfig(jsonStr) {
     let config;
     try {
       config = JSON.parse(jsonStr);
@@ -1922,24 +2211,20 @@
       return;
     }
 
-    const existing = JSON.parse(localStorage.getItem('pulsarConnections') || '{}');
-    const incoming = config.connections || {};
-    const conflicts = Object.keys(incoming).filter(k => existing[k]);
+    const existingTree = await storage.loadTree();
+    const incomingTree = ConnTree.normalizeStoredData(config.connections);
+    const incomingLabels = ConnTree.getAllConnectionLabels(incomingTree);
+    const conflicts = incomingLabels.filter(label => ConnTree.connectionLabelExists(existingTree, label));
 
-    let merge = true;
+    let overwrite = true;
     if (conflicts.length > 0) {
-      merge = confirm(
+      overwrite = confirm(
         `${conflicts.length} connection(s) already exist (${conflicts.join(', ')}).\n\nOverwrite duplicates?`
       );
-      if (!merge) {
-        Object.keys(incoming).forEach(k => {
-          if (existing[k]) delete incoming[k];
-        });
-      }
     }
 
-    const merged = { ...existing, ...incoming };
-    localStorage.setItem('pulsarConnections', JSON.stringify(merged));
+    const merged = ConnTree.mergeTrees(existingTree, incomingTree, overwrite);
+    await storage.saveTree(merged);
 
     if (config.templates) {
       for (const [key, value] of Object.entries(config.templates)) {
@@ -1961,12 +2246,12 @@
       }
     }
 
-    const connCount = Object.keys(incoming).length;
+    const connCount = incomingLabels.length;
     const tmplCount = config.templates
       ? Object.values(config.templates).reduce((sum, t) => sum + Object.keys(t).length, 0)
       : 0;
 
-    refreshSavedConnections();
+    await refreshSavedConnections();
     refreshTemplatesList();
     addConsumerMessage('info', `Imported config: ${connCount} connection(s), ${tmplCount} template(s).`);
   }
