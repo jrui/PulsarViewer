@@ -19,11 +19,15 @@ fn main() {
 
 /// Opens a native "Save As" dialog and writes `content` to the chosen path.
 /// Returns the saved file path, or an empty string if the user cancelled.
+///
+/// Uses `rfd::FileDialog` (synchronous `runModal`) directly instead of
+/// `tauri::api::dialog`, which on macOS shows the save panel as an async
+/// NSSavePanel sheet with a GCD completion handler. That async path can
+/// deadlock/hang under tao's custom event loop, freezing the whole app
+/// with the spinning wait cursor.
 #[tauri::command]
 fn save_export_file(default_name: String, content: String) -> Result<String, String> {
-    use tauri::api::dialog::blocking::FileDialogBuilder;
-
-    let path = FileDialogBuilder::new()
+    let path = rfd::FileDialog::new()
         .set_file_name(&default_name)
         .add_filter("JSON", &["json"])
         .save_file();

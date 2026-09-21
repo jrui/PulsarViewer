@@ -2298,6 +2298,7 @@ dependencies = [
 name = "pulsarviewer"
 version = "3.0.21"
 dependencies = [
+ "rfd",
  "serde",
  "serde_json",
  "tauri",
