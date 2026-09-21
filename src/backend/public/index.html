@@ -30,7 +30,10 @@
       <div id="connection-panel">
         <div class="sidebar-section-title">
           <span>Connection</span>
-          <button id="newConnectionBtn" class="icon-btn" title="New connection">+</button>
+          <span class="sidebar-section-actions">
+            <button id="newFolderBtn" class="icon-btn" title="New folder">&#128193;+</button>
+            <button id="newConnectionBtn" class="icon-btn" title="New connection">+</button>
+          </span>
         </div>
 
         <div id="saved-connections-list"></div>
@@ -462,6 +465,7 @@
   </div>
 
   <script src="live-refresh.js"></script>
+  <script src="connections-tree.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
