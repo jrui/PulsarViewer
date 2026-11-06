@@ -1357,7 +1357,7 @@
         }
         return;
       }
-      renderTopicStats(data);
+      renderTopicStats(data, group.baseName);
       renderPartitionSummary(group);
       startAutoRefresh();
     } catch (e) {
@@ -1464,7 +1464,7 @@
         document.getElementById('management-content').style.display = 'none';
         return;
       }
-      renderTopicStats(data);
+      renderTopicStats(data, topic);
       hidePartitionSummary();
       startAutoRefresh();
     } catch (e) {
@@ -1501,14 +1501,18 @@
     }
   }
 
-  function renderTopicStats(stats) {
+  let retentionRequestId = 0;
+
+  function renderTopicStats(stats, retentionTopic = selectedTopic) {
     document.getElementById('stat-msgRateIn').textContent      = fmtRate(stats.msgRateIn);
     document.getElementById('stat-msgRateOut').textContent     = fmtRate(stats.msgRateOut);
     document.getElementById('stat-throughputIn').textContent   = fmtBytes(stats.msgThroughputIn);
     document.getElementById('stat-throughputOut').textContent  = fmtBytes(stats.msgThroughputOut);
     document.getElementById('stat-storageSize').textContent    = fmtBytes(stats.storageSize);
+    document.getElementById('stat-backlogSize').textContent    = fmtBytes(stats.backlogSize);
     document.getElementById('stat-producers').textContent      = stats.publishers ? stats.publishers.length : (stats.producers || '—');
     document.getElementById('stat-consumers').textContent      = stats.consumers != null ? stats.consumers : '—';
+    loadTopicRetention(retentionTopic);
 
     const subs = stats.subscriptions || {};
     const subKeys = Object.keys(subs);
@@ -1573,6 +1577,55 @@
       ptbody.appendChild(tr);
     });
     if (producers.length === 0) ptbody.innerHTML = '<tr><td colspan="4" class="td-empty">No active producers</td></tr>';
+  }
+
+  async function loadTopicRetention(topic) {
+    const requestId = ++retentionRequestId;
+    const timeEl = document.getElementById('stat-retentionTime');
+    const sizeEl = document.getElementById('stat-retentionSize');
+    timeEl.textContent = 'Loading…';
+    sizeEl.textContent = 'Loading…';
+
+    const serviceUrl = serviceUrlEl.value.trim();
+    const token = tokenEl.value.trim();
+    const params = new URLSearchParams({ serviceUrl, topic });
+    if (token) params.append('token', token);
+
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/topic-retention?${params}`);
+      const data = await res.json();
+      if (requestId !== retentionRequestId) return;
+      if (res.status === 401 || res.status === 403) {
+        timeEl.textContent = 'Restricted';
+        sizeEl.textContent = 'Restricted';
+        return;
+      }
+      if (!res.ok) {
+        timeEl.textContent = 'Unavailable';
+        sizeEl.textContent = 'Unavailable';
+        return;
+      }
+      timeEl.textContent = fmtRetentionTime(data.retentionTimeInMinutes);
+      sizeEl.textContent = fmtRetentionSize(data.retentionSizeInMB);
+    } catch {
+      if (requestId !== retentionRequestId) return;
+      timeEl.textContent = 'Unavailable';
+      sizeEl.textContent = 'Unavailable';
+    }
+  }
+
+  function fmtRetentionTime(minutes) {
+    if (minutes == null) return '—';
+    if (minutes < 0) return 'Unlimited';
+    if (minutes >= 1440) return `${(minutes / 1440).toFixed(1)} d`;
+    if (minutes >= 60) return `${(minutes / 60).toFixed(1)} h`;
+    return `${minutes} min`;
+  }
+
+  function fmtRetentionSize(megabytes) {
+    if (megabytes == null) return '—';
+    if (megabytes < 0) return 'Unlimited';
+    return fmtBytes(megabytes * 1024 * 1024);
   }
 
   // ─── Subscription Actions ──────────────────────────────────────────────

@@ -134,6 +134,7 @@ func NewHTTPHandler(pulsarClient *pulsar.ClientManager, messageStore *store.Mess
 	mux.HandleFunc("/api/admin/topics", handler.handleAdminTopics)
 	mux.HandleFunc("/api/admin/topic-stats", handler.handleAdminTopicStats)
 	mux.HandleFunc("/api/admin/topic-internal-stats", handler.handleAdminTopicInternalStats)
+	mux.HandleFunc("/api/admin/topic-retention", handler.handleAdminTopicRetention)
 	mux.HandleFunc("/api/admin/subscriptions", handler.handleAdminSubscriptions)
 	mux.HandleFunc("/api/admin/namespaces", handler.handleAdminNamespaces)
 	mux.HandleFunc("/api/admin/check-permissions", handler.handleAdminCheckPermissions)
@@ -1238,6 +1239,37 @@ func (h *HTTPHandler) handleAdminTopicInternalStats(w http.ResponseWriter, r *ht
 	w.Write(body)
 }
 
+func (h *HTTPHandler) handleAdminTopicRetention(w http.ResponseWriter, r *http.Request) {
+	serviceURL := r.URL.Query().Get("serviceUrl")
+	topic := r.URL.Query().Get("topic")
+	token := r.URL.Query().Get("token")
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if serviceURL == "" || topic == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "serviceUrl and topic are required"})
+		return
+	}
+
+	bases, err := adminHTTPBases(serviceURL)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
+		return
+	}
+
+	retentionPath := topicToAdminPath(topic, "retention") + "?applied=true"
+	body, status, err := adminRequest(bases, token, retentionPath)
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Admin API unreachable: " + err.Error()})
+		return
+	}
+	w.WriteHeader(status)
+	w.Write(body)
+}
+
 func (h *HTTPHandler) handleAdminSubscriptions(w http.ResponseWriter, r *http.Request) {
 	serviceURL := r.URL.Query().Get("serviceUrl")
 	topic := r.URL.Query().Get("topic")
@@ -1373,6 +1405,15 @@ func (h *HTTPHandler) handleAdminCheckPermissions(w http.ResponseWriter, r *http
 	if topic != "" {
 		statsPath := topicToAdminPath(topic, "stats")
 		subsPath := topicToAdminPath(topic, "subscriptions")
+		statsBody, statsStatus, _ := adminRequestMethod([]string{resolvedBase}, token, http.MethodGet, statsPath, nil)
+		if statsStatus == http.StatusNotFound {
+			partitionedStatsPath := topicToAdminPath(topic, "partitioned-stats")
+			if body, status, _ := adminRequestMethod([]string{resolvedBase}, token, http.MethodGet, partitionedStatsPath, nil); status == http.StatusOK || status == http.StatusUnauthorized || status == http.StatusForbidden {
+				statsPath = partitionedStatsPath
+				statsBody = body
+				statsStatus = status
+			}
+		}
 		probes = append(probes,
 			probe{"Topic stats", statsPath, http.MethodGet, "topic", nil},
 			probe{"List subscriptions", subsPath, http.MethodGet, "topic", nil},
@@ -1381,12 +1422,11 @@ func (h *HTTPHandler) handleAdminCheckPermissions(w http.ResponseWriter, r *http
 		// Probe subscription read access using first available subscription.
 		// Only safe read-only (GET) endpoints are probed — skip/clear are
 		// write operations and cannot be used as probes without side effects.
-		body, status, _ := adminRequestMethod([]string{resolvedBase}, token, http.MethodGet, statsPath, nil)
-		if status == http.StatusOK {
+		if statsStatus == http.StatusOK {
 			var stats struct {
 				Subscriptions map[string]interface{} `json:"subscriptions"`
 			}
-			if json.Unmarshal(body, &stats) == nil && len(stats.Subscriptions) > 0 {
+			if json.Unmarshal(statsBody, &stats) == nil && len(stats.Subscriptions) > 0 {
 				var testSub string
 				for k := range stats.Subscriptions {
 					testSub = k
